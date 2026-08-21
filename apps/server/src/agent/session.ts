@@ -1,9 +1,9 @@
 /**
- * One agent turn = one `query()` call against the Claude Agent SDK, resumed via
- * the thread's sdkSessionId. Emits ChatEvents on the hub and persists the
- * assistant message when the turn completes.
+ * Shared turn orchestration for Claude Code, Codex, and OpenCode. Provider
+ * drivers stream into the same ChatEvents and use the same guarded DB tools;
+ * provider-specific session ids share the legacy sdkSessionId column.
  */
-import { type Options, type Query, query } from "@anthropic-ai/claude-agent-sdk";
+import { type Options, query } from "@anthropic-ai/claude-agent-sdk";
 import {
   type ApprovalId,
   type ChatEvent,
@@ -20,16 +20,23 @@ import * as Stream from "effect/Stream";
 
 import type { Driver } from "../Services/DriverRegistry.ts";
 import { claudeSdkOptions } from "./claudeRuntime.ts";
+import { resolveCliRuntime } from "./cliRuntime.ts";
+import { startCodexTurn } from "./codexDriver.ts";
+import type { AgentTurnHandle } from "./driver.ts";
+import { DriverEventCollector } from "./driverEvents.ts";
 import { MCP_SERVER_NAME, TurnNormalizer } from "./events.ts";
 import type { ChatHub } from "./hub.ts";
+import { findModel } from "./models.ts";
+import { startOpenCodeTurn } from "./opencodeDriver.ts";
 import { buildSystemPrompt, buildUserPrompt, schemaSummary } from "./prompt.ts";
+import { providerSession, setProviderSession } from "./providerSessions.ts";
 import { type ChatRepoShape, newId } from "./repo.ts";
-import { makeDbchatMcpServer, type ProposeWriteOutcome } from "./tools.ts";
+import { DBCHAT_TOOL_NAMES, invokeDbchatTool, makeDbchatMcpServer, type ProposeWriteOutcome, type ToolContext } from "./tools.ts";
 import type { AiWriteRequest, AiWriteResult } from "./writeGate.ts";
 
 export const APPROVAL_TIMEOUT = Duration.minutes(10);
 
-export const TOOL_NAMES = ["list_schemas", "describe_table", "sample_rows", "run_sql", "explain", "propose_write"] as const;
+export const TOOL_NAMES = DBCHAT_TOOL_NAMES;
 export const MCP_TOOL_NAMES = TOOL_NAMES.map((t) => `mcp__${MCP_SERVER_NAME}__${t}`);
 
 export interface PendingApproval {
@@ -48,12 +55,13 @@ export interface SessionDeps {
   readonly pendingApprovals: Map<ApprovalId, PendingApproval>;
   readonly model: string;
   readonly cwd: string;
+  readonly serverUrl?: string;
   readonly log: (msg: string, data?: Record<string, unknown>) => Effect.Effect<void>;
 }
 
 export interface ActiveTurn {
   readonly messageId: MessageId;
-  readonly query: Query;
+  readonly query: Pick<AgentTurnHandle, "interrupt">;
 }
 
 /** Cheap per-connection cache for the schema summary. */
@@ -120,13 +128,12 @@ export const runTurn = (args: {
   connection: Connection;
   input: ChatSendInput;
   messageId: MessageId;
-  onQuery: (q: Query) => void;
+  onQuery: (q: Pick<AgentTurnHandle, "interrupt">) => void;
 }) =>
   Effect.gen(function* () {
     const { deps, connection, input, messageId } = args;
     let thread = args.thread;
     const publish = (e: ChatEvent) => deps.hub.publish(thread.id, e);
-    const normalizer = new TurnNormalizer(messageId);
     const run = Effect.runPromiseWith(yield* Effect.context<never>());
 
     // 1. Persist the user message (+ title from the first one).
@@ -155,9 +162,17 @@ export const runTurn = (args: {
       yield* deps.log("driver unavailable for thread", { threadId: thread.id, error: String(driverResult.failure) });
     }
 
-    // 3. Tools: events from tools are published AND folded into the persisted parts.
-    const emit = (e: ChatEvent) => Effect.sync(() => normalizer.ingestToolEvent(e)).pipe(Effect.andThen(publish(e)));
-    const mcpServer = makeDbchatMcpServer({
+    const provider = findModel(deps.model)?.provider ?? "anthropic";
+    const userPrompt = buildUserPrompt(input.text, input.context);
+    const systemPrompt = buildSystemPrompt({ connection, dialect, schema });
+    const saveProviderSession = (sessionId: string) => Effect.gen(function* () {
+      const stored = setProviderSession(thread.sdkSessionId, provider, sessionId);
+      if (stored === thread.sdkSessionId) return;
+      thread = { ...thread, sdkSessionId: stored };
+      yield* deps.repo.setSdkSessionId(thread.id, stored);
+    });
+
+    const makeToolContext = (emit: (event: ChatEvent) => Effect.Effect<void>): ToolContext => ({
       connectionId: thread.connectionId,
       messageId,
       run,
@@ -165,22 +180,96 @@ export const runTurn = (args: {
       emit,
       proposeWrite: ({ sql, estimatedRows }) => proposeWrite({ deps, thread, messageId, sql, estimatedRows, emit }),
     });
+    const exposeInterrupt = (handle: Pick<AgentTurnHandle, "interrupt">) => {
+      args.onQuery({
+        interrupt: async () => {
+          // Release any tool call waiting on a write approval before stopping
+          // the provider process, otherwise its completion chain can remain
+          // blocked until the ten-minute approval timeout.
+          const pending = [...deps.pendingApprovals.values()].filter((approval) => approval.threadId === thread.id);
+          await Promise.all(pending.map((approval) => run(Deferred.succeed(approval.decision, false))));
+          await handle.interrupt();
+        },
+      });
+    };
 
-    // 4. Run the SDK query and normalise.
+    if (provider !== "anthropic") {
+      const collector = new DriverEventCollector(messageId);
+      const emit = (event: ChatEvent) => Effect.sync(() => collector.ingestToolEvent(event)).pipe(Effect.andThen(publish(event)));
+      const toolContext = makeToolContext(emit);
+      const callbacks = {
+        onSession: (sessionId: string) => run(saveProviderSession(sessionId)),
+        onText: (text: string) => {
+          const event = collector.text(text);
+          return event ? run(publish(event)) : Promise.resolve();
+        },
+        onThinking: (text: string) => {
+          const event = collector.thinking(text);
+          return event ? run(publish(event)) : Promise.resolve();
+        },
+        callTool: async (name: string, toolInput: unknown, callId: string) => {
+          await run(publish(collector.toolStart(callId, name, toolInput)));
+          const result = await invokeDbchatTool(toolContext, name, toolInput);
+          await run(publish(collector.toolEnd(callId, result.content, result.isError === true)));
+          return result;
+        },
+      };
+      const runtime = resolveCliRuntime(provider);
+      if (!runtime.binary) {
+        yield* publish({ _tag: "Error", message: `${provider === "openai" ? "Codex" : "OpenCode"} CLI was not found on PATH.` });
+        yield* deps.repo.touchThread(thread.id);
+        yield* publish({ _tag: "TurnDone", messageId, model: deps.model });
+        return;
+      }
+      const turnArgs = {
+        binary: runtime.binary,
+        env: runtime.env,
+        model: deps.model,
+        cwd: deps.cwd,
+        systemPrompt,
+        userPrompt,
+        ...(deps.serverUrl ? { serverUrl: deps.serverUrl } : {}),
+        ...(providerSession(thread.sdkSessionId, provider) ? { sessionId: providerSession(thread.sdkSessionId, provider)! } : {}),
+        callbacks,
+      };
+      const handle = provider === "openai" ? startCodexTurn(turnArgs) : startOpenCodeTurn(turnArgs);
+      exposeInterrupt(handle);
+      const outcome = yield* Effect.promise(() => handle.done);
+      if (outcome.error) yield* publish({ _tag: "Error", message: outcome.error });
+      if (collector.parts.length > 0) {
+        yield* deps.repo.insertMessage({
+          id: messageId,
+          threadId: thread.id,
+          role: "assistant",
+          parts: collector.snapshotParts(),
+          createdAt: new Date().toISOString(),
+        });
+      }
+      yield* deps.repo.touchThread(thread.id);
+      yield* publish({ _tag: "TurnDone", messageId, ...(outcome.usage ? { usage: outcome.usage } : {}), model: deps.model });
+      return;
+    }
+
+    // Claude SDK path. Tools: events from tools are published AND folded into persisted parts.
+    const normalizer = new TurnNormalizer(messageId);
+    const emit = (event: ChatEvent) => Effect.sync(() => normalizer.ingestToolEvent(event)).pipe(Effect.andThen(publish(event)));
+    const mcpServer = makeDbchatMcpServer(makeToolContext(emit));
+
+    // 4. Run the Claude SDK query and normalise.
     const q = query({
-      prompt: buildUserPrompt(input.text, input.context),
+      prompt: userPrompt,
       options: buildQueryOptions({
         model: deps.model,
         cwd: deps.cwd,
-        systemPrompt: buildSystemPrompt({ connection, dialect, schema }),
-        resume: thread.sdkSessionId,
+        systemPrompt,
+        resume: providerSession(thread.sdkSessionId, "anthropic"),
         mcpServer,
         stderr: (d) => {
           if (process.env.DBCHAT_AGENT_DEBUG) console.error("[claude]", d.trimEnd());
         },
       }),
     });
-    args.onQuery(q);
+    exposeInterrupt(q);
 
     let sawTurnDone = false;
     let persisted = false;
@@ -188,9 +277,8 @@ export const runTurn = (args: {
       Stream.runForEach((msg) =>
         Effect.gen(function* () {
           const events = normalizer.handle(msg);
-          if (normalizer.sessionId && normalizer.sessionId !== thread.sdkSessionId) {
-            thread = { ...thread, sdkSessionId: normalizer.sessionId };
-            yield* deps.repo.setSdkSessionId(thread.id, normalizer.sessionId);
+          if (normalizer.sessionId && normalizer.sessionId !== providerSession(thread.sdkSessionId, "anthropic")) {
+            yield* saveProviderSession(normalizer.sessionId);
           }
           for (const e of events) {
             if (e._tag === "TurnDone") {

@@ -32,11 +32,14 @@ export const resolveSelectedModel = (
   catalog: ReadonlyArray<ProviderModels> | undefined,
   candidates: ReadonlyArray<string | null | undefined>,
 ): ModelInfo | undefined => {
+  const readyIds = new Set((catalog ?? []).filter((provider) => provider.status === "ready").flatMap((provider) => provider.models.map((model) => model.id)));
   for (const id of candidates) {
     const found = findModel(catalog, id);
-    if (found) return found;
+    if (found && readyIds.has(found.id)) return found;
   }
-  return catalogDefaultModel(catalog) ?? allModels(catalog)[0];
+  const serverDefault = catalogDefaultModel(catalog);
+  if (serverDefault && readyIds.has(serverDefault.id)) return serverDefault;
+  return allModels(catalog).find((model) => readyIds.has(model.id));
 };
 
 /** Short label for a model id, falling back to the raw id for unknown ones. */

@@ -28,6 +28,86 @@ export interface ProposeWriteOutcome {
   readonly error?: string;
 }
 
+export const DBCHAT_TOOL_NAMES = ["list_schemas", "describe_table", "sample_rows", "run_sql", "explain", "propose_write"] as const;
+export type DbchatToolName = (typeof DBCHAT_TOOL_NAMES)[number];
+
+/** Provider-neutral tool metadata used by Codex dynamic tools and the OpenCode MCP bridge. */
+export const DBCHAT_TOOL_SPECS: ReadonlyArray<{
+  readonly name: DbchatToolName;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+}> = [
+  {
+    name: "list_schemas",
+    description: "List schemas and their tables (with kind and approximate row counts).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "describe_table",
+    description: "Describe one table: columns (type, nullable, default), primary key, foreign keys and indexes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        schema: { type: "string", description: "Schema name (e.g. public, main, a MySQL database, or a BigQuery dataset)" },
+        table: { type: "string" },
+      },
+      required: ["schema", "table"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "sample_rows",
+    description: `Return up to ${MAX_SAMPLE_ROWS} rows from a table to understand its data.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        schema: { type: "string" },
+        table: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: MAX_SAMPLE_ROWS },
+      },
+      required: ["schema", "table"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "run_sql",
+    description: `Run a READ-ONLY SQL query (SELECT/WITH/SHOW/EXPLAIN). Rows are capped at ${MAX_ROWS}; writes are rejected and must use propose_write.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        sql: { type: "string", description: "The SQL to execute" },
+        limit: { type: "integer", minimum: 1, maximum: MAX_ROWS },
+      },
+      required: ["sql"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "explain",
+    description: "Return the query plan (EXPLAIN) for a SQL statement without executing it against data.",
+    inputSchema: {
+      type: "object",
+      properties: { sql: { type: "string" } },
+      required: ["sql"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "propose_write",
+    description: "Submit one data-changing statement. It runs only when policy permits AI writes or after the user approves it in dbchat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sql: { type: "string", description: "Exact statement to run; one statement, inside a transaction" },
+        rationale: { type: "string", description: "What this changes and why" },
+        estimatedRows: { type: "integer", minimum: 0 },
+      },
+      required: ["sql", "rationale"],
+      additionalProperties: false,
+    },
+  },
+];
+
 export interface ToolContext {
   readonly connectionId: ConnectionId;
   readonly messageId: MessageId;
@@ -110,8 +190,110 @@ const guarded =
   <A>(effect: Effect.Effect<ToolResult, A>) =>
     ctx.run(effect.pipe(Effect.catch((e) => Effect.succeed(err(errorMessage(e)))))).catch((e: unknown) => err(errorMessage(e)));
 
-export const makeDbchatMcpServer = (ctx: ToolContext) => {
+const objectInput = (input: unknown): Record<string, unknown> =>
+  input !== null && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
+
+/** Execute one dbchat tool independently of any agent SDK. */
+export const invokeDbchatTool = (ctx: ToolContext, name: string, input: unknown): Promise<ToolResult> => {
   const g = guarded(ctx);
+  const value = objectInput(input);
+  const string = (key: string) => {
+    const v = value[key];
+    if (typeof v !== "string" || v.length === 0) throw new Error(`${key} must be a non-empty string`);
+    return v;
+  };
+  const optionalInt = (key: string, max?: number, min = 0) => {
+    const v = value[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < min || (max !== undefined && v > max)) {
+      throw new Error(`${key} must be an integer${max === undefined ? ` at least ${min}` : ` between ${min} and ${max}`}`);
+    }
+    return v;
+  };
+
+  try {
+    switch (name) {
+      case "list_schemas":
+        return g(Effect.gen(function* () {
+          const driver = yield* ctx.driver;
+          const schemas = yield* driver.introspect;
+          return ok(schemas.map((schema) => ({
+            schema: schema.name,
+            tables: schema.tables.map((table) => ({ name: table.name, kind: table.kind, rowEstimate: table.rowEstimate })),
+          })));
+        }));
+      case "describe_table": {
+        const schema = string("schema");
+        const table = string("table");
+        return g(Effect.gen(function* () {
+          const driver = yield* ctx.driver;
+          const detail = yield* driver.describeTable(schema, table);
+          return ok({
+            table: detail.table,
+            columns: detail.columns,
+            primaryKey: detail.columns.filter((column) => column.isPrimaryKey).map((column) => column.name),
+            foreignKeys: detail.columns.filter((column) => column.foreignKey).map((column) => ({ column: column.name, references: column.foreignKey })),
+            indexes: detail.indexes,
+          });
+        }));
+      }
+      case "sample_rows": {
+        const schema = string("schema");
+        const table = string("table");
+        const limit = optionalInt("limit", MAX_SAMPLE_ROWS, 1);
+        return g(Effect.gen(function* () {
+          const driver = yield* ctx.driver;
+          const page = yield* driver.rows({ connectionId: ctx.connectionId, schema, table, limit: Math.min(limit ?? 10, MAX_SAMPLE_ROWS), offset: 0 });
+          return ok({ columns: page.columns.map((column) => column.name), rows: page.rows.map((row) => row.map(truncateCell)), total: page.total });
+        }));
+      }
+      case "run_sql": {
+        const sql = string("sql");
+        const limit = optionalInt("limit", MAX_ROWS, 1);
+        return g(Effect.gen(function* () {
+          const driver = yield* ctx.driver;
+          const started = Date.now();
+          const result = yield* collectQuery(driver, sql, { readOnly: true, limit: Math.max(1, limit ?? 100) });
+          const durationMs = Date.now() - started;
+          yield* ctx.emit({ _tag: "ResultTable", messageId: ctx.messageId, columns: result.columns, rows: result.rows, sql });
+          return ok({
+            columns: result.columns.map((column) => `${column.name}:${column.type}`),
+            rowCount: result.rows.length,
+            truncated: result.truncated,
+            durationMs,
+            rows: result.rows,
+          });
+        }));
+      }
+      case "explain": {
+        const sql = string("sql");
+        return g(Effect.gen(function* () {
+          const driver = yield* ctx.driver;
+          return ok(yield* driver.explain(sql));
+        }));
+      }
+      case "propose_write": {
+        const sql = string("sql");
+        const rationale = string("rationale");
+        const estimatedRows = optionalInt("estimatedRows");
+        return g(Effect.gen(function* () {
+          const outcome = yield* ctx.proposeWrite({ sql, rationale, ...(estimatedRows !== undefined ? { estimatedRows } : {}) });
+          switch (outcome.status) {
+            case "executed": return ok({ status: "executed", rowCount: outcome.rowCount ?? null });
+            case "rejected": return ok({ status: "rejected", note: "The user rejected this write. Do not retry it unless they ask." });
+            case "failed": return err(`Write failed: ${outcome.error ?? "unknown error"}`);
+          }
+        }));
+      }
+      default:
+        return Promise.resolve(err(`Unknown tool: ${name}`));
+    }
+  } catch (error) {
+    return Promise.resolve(err(errorMessage(error)));
+  }
+};
+
+export const makeDbchatMcpServer = (ctx: ToolContext) => {
   return createSdkMcpServer({
     name: MCP_SERVER_NAME,
     version: "0.1.0",
@@ -121,90 +303,31 @@ export const makeDbchatMcpServer = (ctx: ToolContext) => {
         "list_schemas",
         "List schemas and their tables (with kind and approximate row counts).",
         {},
-        () =>
-          g(
-            Effect.gen(function* () {
-              const driver = yield* ctx.driver;
-              const schemas = yield* driver.introspect;
-              return ok(
-                schemas.map((s) => ({
-                  schema: s.name,
-                  tables: s.tables.map((t) => ({ name: t.name, kind: t.kind, rowEstimate: t.rowEstimate })),
-                })),
-              );
-            }),
-          ),
+        () => invokeDbchatTool(ctx, "list_schemas", {}),
       ),
       tool(
         "describe_table",
         "Describe one table: columns (type, nullable, default), primary key, foreign keys and indexes.",
         { schema: z.string().describe("Schema name (e.g. public, main, a MySQL database, or a BigQuery dataset)"), table: z.string() },
-        ({ schema, table }) =>
-          g(
-            Effect.gen(function* () {
-              const driver = yield* ctx.driver;
-              const d = yield* driver.describeTable(schema, table);
-              return ok({
-                table: d.table,
-                columns: d.columns,
-                primaryKey: d.columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
-                foreignKeys: d.columns.filter((c) => c.foreignKey).map((c) => ({ column: c.name, references: c.foreignKey })),
-                indexes: d.indexes,
-              });
-            }),
-          ),
+        (input) => invokeDbchatTool(ctx, "describe_table", input),
       ),
       tool(
         "sample_rows",
         `Return up to ${MAX_SAMPLE_ROWS} rows from a table to understand its data.`,
         { schema: z.string(), table: z.string(), limit: z.number().int().min(1).max(MAX_SAMPLE_ROWS).optional() },
-        ({ schema, table, limit }) =>
-          g(
-            Effect.gen(function* () {
-              const driver = yield* ctx.driver;
-              const page = yield* driver.rows({ connectionId: ctx.connectionId, schema, table, limit: Math.min(limit ?? 10, MAX_SAMPLE_ROWS), offset: 0 });
-              return ok({
-                columns: page.columns.map((c) => c.name),
-                rows: page.rows.map((r) => r.map(truncateCell)),
-                total: page.total,
-              });
-            }),
-          ),
+        (input) => invokeDbchatTool(ctx, "sample_rows", input),
       ),
       tool(
         "run_sql",
         `Run a READ-ONLY SQL query (SELECT/WITH/SHOW/EXPLAIN). Rows are capped at ${MAX_ROWS}; the user sees the results as a grid automatically, so do not repeat them verbatim. Writes are rejected: use propose_write.`,
         { sql: z.string().describe("The SQL to execute"), limit: z.number().int().min(1).max(MAX_ROWS).optional().describe(`Row cap (default 100, max ${MAX_ROWS})`) },
-        ({ sql, limit }) =>
-          g(
-            Effect.gen(function* () {
-              const driver = yield* ctx.driver;
-              const started = Date.now();
-              const res = yield* collectQuery(driver, sql, { readOnly: true, limit: limit ?? 100 });
-              const durationMs = Date.now() - started;
-              yield* ctx.emit({ _tag: "ResultTable", messageId: ctx.messageId, columns: res.columns, rows: res.rows, sql });
-              return ok({
-                columns: res.columns.map((c) => `${c.name}:${c.type}`),
-                rowCount: res.rows.length,
-                truncated: res.truncated,
-                durationMs,
-                rows: res.rows,
-              });
-            }),
-          ),
+        (input) => invokeDbchatTool(ctx, "run_sql", input),
       ),
       tool(
         "explain",
         "Return the query plan (EXPLAIN) for a SQL statement without executing it against data.",
         { sql: z.string() },
-        ({ sql }) =>
-          g(
-            Effect.gen(function* () {
-              const driver = yield* ctx.driver;
-              const plan = yield* driver.explain(sql);
-              return ok(plan);
-            }),
-          ),
+        (input) => invokeDbchatTool(ctx, "explain", input),
       ),
       tool(
         "propose_write",
@@ -214,20 +337,7 @@ export const makeDbchatMcpServer = (ctx: ToolContext) => {
           rationale: z.string().describe("One or two sentences: what this changes and why."),
           estimatedRows: z.number().int().nonnegative().optional().describe("Estimated affected rows, if known"),
         },
-        ({ sql, rationale, estimatedRows }) =>
-          g(
-            Effect.gen(function* () {
-              const outcome = yield* ctx.proposeWrite({ sql, rationale, ...(estimatedRows !== undefined ? { estimatedRows } : {}) });
-              switch (outcome.status) {
-                case "executed":
-                  return ok({ status: "executed", rowCount: outcome.rowCount ?? null });
-                case "rejected":
-                  return ok({ status: "rejected", note: "The user rejected this write. Do not retry it unless they ask." });
-                case "failed":
-                  return err(`Write failed: ${outcome.error ?? "unknown error"}`);
-              }
-            }),
-          ),
+        (input) => invokeDbchatTool(ctx, "propose_write", input),
       ),
     ],
   });

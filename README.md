@@ -2,7 +2,7 @@
 
 Chat-centred SQL GUI for **Postgres, MySQL, SQLite and Google BigQuery**. Ask questions in plain language, browse
 and sort tables, write SQL with AI suggestions — all against your own databases, locally. The
-assistant runs through your existing **Claude Code** login; writes always go through an approval card.
+assistant can run through your existing **Claude Code, Codex, or OpenCode** login; writes always go through an approval card.
 
 > **Status:** v1, macOS arm64 desktop build + web dev mode. Unsigned build — see install notes.
 
@@ -13,7 +13,7 @@ assistant runs through your existing **Claude Code** login; writes always go thr
 | Need | Why | Check |
 |---|---|---|
 | [Bun](https://bun.sh) ≥ 1.3 | package manager, server runtime, desktop build | `bun --version` |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) logged in | the chat assistant reuses its login — no API key needed | `claude --version`, then `claude` once to sign in |
+| An agent CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex/cli), or [OpenCode](https://opencode.ai/docs/) | the assistant reuses the CLI's existing login/config | `claude --version`, `codex --version`, or `opencode --version` |
 | A database to point at | Postgres ≥ 12, MySQL ≥ 8, a SQLite file, or a BigQuery project | optional — SQLite needs nothing running; BigQuery can use ADC or service-account JSON |
 | macOS 13+ on Apple Silicon | only target the desktop build ships today (web dev mode runs anywhere Bun does) | |
 
@@ -57,7 +57,7 @@ Re-run the install one-liner (desktop), or `git pull && bun install` (source).
 
 ```
 apps/web            Vite + React + TanStack Router + react-query (UI)
-apps/server         Effect 4 on Bun: HTTP + RPC-over-WebSocket, sqlite app state, DB drivers, Claude agent
+apps/server         Effect 4 on Bun: HTTP + RPC-over-WebSocket, sqlite app state, DB + agent drivers
 apps/desktop        Electron shell: serves apps/web/dist, supervises the server as a sidecar binary
 packages/contracts  effect/Schema models + RpcGroup shared by both
 ```
@@ -114,12 +114,14 @@ Nothing here is sent to the server.
 
 ### Models
 
-The server serves the catalog over `ai.models` (grouped by provider — Anthropic only today):
-`claude-haiku-4-5` (fast), `claude-sonnet-5` (balanced), `claude-opus-5` (frontier). `DBCHAT_MODEL`
-picks which entry is marked as the server default.
+The server serves the catalog over `ai.models`, grouped by provider. Claude Code is available through
+the Agent SDK runtime; Codex and OpenCode become selectable when their CLIs are found on the login-shell
+`PATH` (or through `DBCHAT_CODEX_CLI` / `DBCHAT_OPENCODE_CLI`). `DBCHAT_MODEL` picks which entry is marked
+as the server default.
 
 The model for a turn is `chat.send`'s `model` → the thread's last model (persisted in
-`threads.model`) → `DBCHAT_MODEL`. Pick one from the picker in the prompt bar; the change applies to
+`threads.model`) → `DBCHAT_MODEL`. Provider session ids are stored independently, so switching providers
+and switching back resumes the right conversation. Pick one from the picker in the prompt bar; the change applies to
 the next send and sticks to the thread. Inline SQL suggestions always run on Haiku.
 
 ### Production guardrails
@@ -150,6 +152,8 @@ their last data instead of throwing, and everything refetches when the server co
 | `DBCHAT_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated origin allow-list for CORS **and** the `/rpc` WebSocket upgrade. A browser `Origin` not on the list gets `403` (so a random web page cannot drive your databases); requests with no `Origin` header (CLI/smoke scripts) pass. Add the origin you serve the web app from when it is not Vite on :5173. |
 | `DBCHAT_MODEL` | `claude-sonnet-5` | Default model for chat turns; marked as the default in the `ai.models` catalog. A thread's own model, and an explicit `model` on `chat.send`, both win over it. |
 | `DBCHAT_AGENT_DEBUG` | unset | Any value mirrors the agent SDK's stderr to the console. |
+| `DBCHAT_CODEX_CLI` | `codex` on login-shell PATH | Optional path or command for the Codex CLI used by the app-server driver. |
+| `DBCHAT_OPENCODE_CLI` | `opencode` on login-shell PATH | Optional path or command for the OpenCode CLI used by the JSON/MCP driver. |
 
 ### Seed a local database
 
@@ -209,6 +213,8 @@ How it fits together:
   3 times, then an error dialog is shown. Logs: `~/Library/Application Support/dbchat/logs/`.
 - `dbchat.app --smoke --smoke-out=<png>` boots everything against a temp profile, waits for the
   connections list, writes a screenshot and exits 0 — used to verify the packaged build.
+- The desktop package bundles Claude Code. Codex and OpenCode are discovered from the user's login-shell
+  `PATH`; install and sign in to those CLIs separately to enable their provider cards.
 - The build is **unsigned / not notarized** (ad-hoc signature only): first launch needs
   right-click → Open, or `xattr -dr com.apple.quarantine dbchat.app`.
 - The server's AES key still lives at `$DBCHAT_HOME/key`; moving it into the macOS keychain is a

@@ -2,9 +2,8 @@
  * AI provider / model catalog.
  *
  * The server owns the catalog (`ai.models`); the UI groups it by provider and
- * sends the chosen `ModelInfo.id` back on `chat.send`. Only Anthropic is wired
- * up today, but `ProviderId` / `ProviderModels` are shaped so a second provider
- * is a data change rather than a contract change.
+ * sends the chosen `ModelInfo.id` back on `chat.send`. Provider availability is
+ * discovered from the installed Claude Code, Codex, and OpenCode runtimes.
  */
 import * as Schema from "effect/Schema";
 
