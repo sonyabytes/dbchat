@@ -1,11 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, Plus, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, MessageSquare, Plus, Trash2, X } from "lucide-react";
 
 import { StatusDot } from "@/components/shared/primitives";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { useChat } from "@/lib/chat-store";
 import { relativeTime } from "@/lib/format";
-import { useOpenTab } from "@/lib/nav";
+import { useCloseTab, useOpenTab } from "@/lib/nav";
 import { tabIds, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { createThread, deleteThread, threadListKey, threadListQuery } from "@/rpc/chat";
@@ -15,6 +22,8 @@ export function ThreadList({ connectionId }: { connectionId: string }) {
   const { data: threads, isLoading } = useQuery(threadListQuery(connectionId));
   const activeTab = useApp((s) => s.activeTab);
   const openTab = useOpenTab();
+  const closeTab = useCloseTab();
+  const openTabs = useApp((s) => s.tabs);
   const qc = useQueryClient();
   const streamingThreads = useChat((s) => s.threads);
   const resetThread = useChat((s) => s.reset);
@@ -37,6 +46,11 @@ export function ThreadList({ connectionId }: { connectionId: string }) {
     },
   });
 
+  const open = (t: { id: string; title: string }) => {
+    setCurrentThread(connectionId, t.id);
+    openTab({ id: tabIds.chat(t.id), kind: "chat", threadId: t.id, title: t.title });
+  };
+
   return (
     <div className="flex flex-col gap-0.5">
       <button
@@ -56,21 +70,20 @@ export function ThreadList({ connectionId }: { connectionId: string }) {
 
       {threads?.map((t) => {
         const live = streamingThreads[t.id]?.streaming ?? false;
-        const active = activeTab === tabIds.chat(t.id);
+        const tabId = tabIds.chat(t.id);
+        const active = activeTab === tabId;
+        const isOpen = openTabs.some((tab) => tab.id === tabId);
         return (
-          <div
-            key={t.id}
-            className={cn(
-              "group flex h-8 w-full items-center gap-2 rounded-sm px-2 text-[13px] hover:bg-hover",
-              active && "bg-sidebar-accent",
-            )}
-          >
+          <ContextMenu key={t.id}>
+            <ContextMenuTrigger
+              className={cn(
+                "group flex h-8 w-full items-center gap-2 rounded-sm px-2 text-[13px] hover:bg-hover",
+                active && "bg-sidebar-accent",
+              )}
+            >
             <button
               type="button"
-              onClick={() => {
-                setCurrentThread(connectionId, t.id);
-                openTab({ id: tabIds.chat(t.id), kind: "chat", threadId: t.id, title: t.title });
-              }}
+              onClick={() => open(t)}
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
             >
               {live ? <StatusDot status="running" /> : <MessageSquare className="size-3.5 shrink-0 text-ink-3" />}
@@ -88,7 +101,29 @@ export function ThreadList({ connectionId }: { connectionId: string }) {
             >
               <Trash2 />
             </Button>
-          </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onClick={() => open(t)}>
+                <ExternalLink />
+                Open
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => void navigator.clipboard.writeText(t.title)}>
+                <Copy />
+                Copy title
+              </ContextMenuItem>
+              {isOpen && (
+                <ContextMenuItem onClick={() => closeTab(tabId)}>
+                  <X />
+                  Close tab
+                </ContextMenuItem>
+              )}
+              <ContextMenuSeparator />
+              <ContextMenuItem variant="destructive" disabled={live} onClick={() => remove.mutate(t.id)}>
+                <Trash2 />
+                Delete
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         );
       })}
     </div>
