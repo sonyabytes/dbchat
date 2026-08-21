@@ -17,6 +17,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Key, Link2 } from "lucide-react";
 import type { ColumnMeta, SortSpec } from "@dbchat/contracts";
 
 import { cn } from "@/lib/utils";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { TypePill } from "./primitives";
 
 export type GridColumn =
@@ -92,12 +93,17 @@ export interface DataGridProps {
   emptyMessage?: string;
   /** Row numbers start at `rowOffset + 1`. */
   rowOffset?: number;
+  /**
+   * Right-click menu content for a data row. When provided, every row gets a
+   * context menu; opening it on an unselected row makes that row the selection.
+   */
+  rowContextMenu?: (ctx: { row: GridRecord; index: number }) => ReactNode;
 }
 
 export function DataGrid({
   columns, rows, globalFilter = "", pageSize = 50, dense = false, className,
   onSelectionChange, onSelectedRowsChange, resetKey, manual = false, sort, onSortChange,
-  hiddenColumns, footer, loading = false, emptyMessage = "No rows.", rowOffset = 0,
+  hiddenColumns, footer, loading = false, emptyMessage = "No rows.", rowOffset = 0, rowContextMenu,
 }: DataGridProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -182,13 +188,25 @@ export function DataGrid({
   const paddingTop = virtualRows.length > 0 ? virtualRows[0]!.start : 0;
   const paddingBottom = virtualRows.length > 0 ? virtualizer.getTotalSize() - virtualRows[virtualRows.length - 1]!.end : 0;
 
-  const toggle = (index: number) =>
+  const anchorRef = useRef<number | null>(null);
+
+  const toggle = (index: number) => {
+    anchorRef.current = index;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(index)) next.delete(index);
       else next.add(index);
       return next;
     });
+  };
+
+  const selectRange = (index: number, shift: boolean) => {
+    const anchor = anchorRef.current;
+    if (!shift || anchor === null) return toggle(index);
+    anchorRef.current = index;
+    const [from, to] = anchor < index ? [anchor, index] : [index, anchor];
+    setSelected(new Set(modelRows.slice(from, to + 1).map((r) => r.index)));
+  };
 
   const toggleAll = () =>
     setSelected((prev) =>
@@ -248,19 +266,52 @@ export function DataGrid({
             {virtualRows.map((v) => {
               const r = modelRows[v.index]!;
               const sel = selected.has(r.index);
-              return (
-                <tr key={r.id} className={cn("group", rowH, sel ? "bg-brand-tint" : "hover:bg-hover")}>
+              const menu = rowContextMenu?.({ row: r.original, index: r.index });
+              const cells = (
+                <>
                   <td className={cn("sticky left-0 z-10 border-b border-r border-line px-0 text-center", sel ? "bg-brand-tint" : "bg-surface group-hover:bg-hover")}>
-                    <button type="button" onClick={() => toggle(r.index)} className="w-full font-mono text-[10.5px] tabular-nums text-ink-3">
+                    <span className="font-mono text-[10.5px] tabular-nums text-ink-3">
                       {sel ? "✓" : rowOffset + r.index + 1}
-                    </button>
+                    </span>
                   </td>
                   {r.getVisibleCells().map((c) => (
                     <td key={c.id} className="max-w-[280px] truncate whitespace-nowrap border-b border-line px-2.5">
                       {flexRender(c.column.columnDef.cell, c.getContext())}
                     </td>
                   ))}
-                </tr>
+                </>
+              );
+              if (!menu) {
+                return (
+                  <tr
+                    key={r.id}
+                    aria-selected={sel}
+                    className={cn("group cursor-default", rowH, sel ? "bg-brand-tint" : "hover:bg-hover")}
+                    onClick={(e) => selectRange(r.index, e.shiftKey)}
+                  >
+                    {cells}
+                  </tr>
+                );
+              }
+              return (
+                <ContextMenu
+                  key={r.id}
+                  onOpenChange={(open) => {
+                    if (open && !selected.has(r.index)) {
+                      anchorRef.current = r.index;
+                      setSelected(new Set([r.index]));
+                    }
+                  }}
+                >
+                  <ContextMenuTrigger
+                    render={<tr aria-selected={sel} />}
+                    className={cn("group cursor-default select-text", rowH, sel ? "bg-brand-tint" : "hover:bg-hover")}
+                    onClick={(e) => selectRange(r.index, e.shiftKey)}
+                  >
+                    {cells}
+                  </ContextMenuTrigger>
+                  {menu}
+                </ContextMenu>
               );
             })}
             {paddingBottom > 0 && <tr style={{ height: paddingBottom }} aria-hidden />}
