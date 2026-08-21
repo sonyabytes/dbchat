@@ -37,10 +37,11 @@ Build it yourself: `bun install && bun run dist:desktop` → `apps/desktop/relea
 
 ```sh
 bun install
-bun run dev        # server http://127.0.0.1:4800 (ws /rpc), web http://localhost:5173
+bun run dev        # via portless: web https://dbchat.localhost, server https://dbchat-api.localhost
+                   # (in a git worktree: https://<branch>.dbchat.localhost); DBCHAT_NO_PORTLESS=1 for :5173 / :4800
 ```
 
-Open http://localhost:5173. Use this for development or on non-mac machines.
+Open https://dbchat.localhost (first run: portless asks to trust its local CA and bind :443). Use this for development or on non-mac machines.
 
 ### First run
 

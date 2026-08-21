@@ -1,8 +1,16 @@
 #!/usr/bin/env bun
-/** Runs server + web dev processes with prefixed output. `bun run dev`. */
+/**
+ * `bun run dev` — server + web behind portless (https://github.com/vercel-labs/portless):
+ *   web    → https://dbchat.localhost
+ *   server → https://dbchat-api.localhost
+ * In a linked git worktree portless prefixes the branch name (https://<branch>.dbchat.localhost), so several
+ * checkouts can run at once without port collisions. Set DBCHAT_NO_PORTLESS=1 to fall back to :5173 / :4800.
+ */
+const portless = process.env.DBCHAT_NO_PORTLESS !== "1";
+const via = (name: string, cmd: string[]) => (portless ? ["bunx", "portless", "run", "--name", name, ...cmd] : cmd);
 const procs: Array<{ name: string; color: string; cwd: string; cmd: string[] }> = [
-  { name: "server", color: "\x1b[36m", cwd: "apps/server", cmd: ["bun", "run", "dev"] },
-  { name: "web", color: "\x1b[35m", cwd: "apps/web", cmd: ["bun", "run", "dev"] },
+  { name: "server", color: "\x1b[36m", cwd: "apps/server", cmd: via("dbchat-api", ["bun", "scripts/dev-portless.ts"]) },
+  { name: "web", color: "\x1b[35m", cwd: "apps/web", cmd: via("dbchat", ["vite"]) },
 ];
 const reset = "\x1b[0m";
 const children: Bun.Subprocess[] = [];
@@ -23,7 +31,7 @@ async function pipe(stream: ReadableStream<Uint8Array>, prefix: string) {
 }
 
 for (const p of procs) {
-  const child = Bun.spawn(p.cmd, { cwd: p.cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, FORCE_COLOR: "1" } });
+  const child = Bun.spawn(p.cmd, { cwd: p.cwd, stdout: "pipe", stderr: "pipe", stdin: "inherit", env: { ...process.env, FORCE_COLOR: "1" } });
   children.push(child);
   const prefix = `${p.color}[${p.name}]${reset}`;
   void pipe(child.stdout, prefix);

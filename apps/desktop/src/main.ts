@@ -128,6 +128,13 @@ async function main(): Promise<void> {
   ipcMain.handle("dbchat:check-for-updates", async () => {
     if (updater) await updater.check({ interactive: true });
   });
+  ipcMain.handle("dbchat:update:state", () => updater?.getState());
+  ipcMain.handle("dbchat:update:check", async () => { await updater?.check({ interactive: false }); });
+  ipcMain.handle("dbchat:update:download", async () => { await updater?.download(); });
+  ipcMain.handle("dbchat:update:install", () => { updater?.install(); });
+  updater?.onChange((st) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("dbchat:update:changed", st);
+  });
   installAppMenu({ isDev, checkForUpdates: updater ? () => void updater?.check({ interactive: true }) : undefined });
   const server = await resolveServer();
   const url = new URL(server.appUrl);

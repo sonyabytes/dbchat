@@ -7,7 +7,7 @@
  *   3. spawn a detached shell script that waits for this process to exit, mounts the dmg,
  *      replaces the .app in place (ditto), clears quarantine, relaunches — then app.quit()
  * Checks run on launch (after a short delay) and every CHECK_INTERVAL_MS; "Check for Updates…" in the app menu
- * runs it interactively. Dismissed versions are remembered in <userData>/updater.json.
+ * runs it interactively; the sidebar icon drives it silently through state events (see getState/onChange).
  */
 import { app, dialog, shell } from "electron";
 import { spawn } from "node:child_process";
@@ -33,11 +33,21 @@ export interface ReleaseInfo {
   readonly notes: string;
 }
 
+export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
+export interface UpdateState {
+  readonly status: UpdateStatus;
+  readonly current: string;
+  readonly latest?: { version: string; notes: string; url: string } | undefined;
+  /** 0..1 while downloading. */
+  readonly progress?: number | undefined;
+  readonly error?: string | undefined;
+}
+
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STARTUP_DELAY_MS = 8_000;
 const ASSET_RE = /-arm64\.dmg$/;
 
-type State = { skipped?: string; lastCheck?: string };
+type State = { lastCheck?: string };
 
 export const parseVersion = (v: string): number[] | undefined => {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
@@ -116,7 +126,24 @@ export class Updater {
   private timer: NodeJS.Timeout | undefined;
   private busy = false;
   private readonly opts: UpdaterOptions;
-  constructor(opts: UpdaterOptions) { this.opts = opts; }
+  private state: UpdateState;
+  private readonly listeners = new Set<(s: UpdateState) => void>();
+  /** Downloaded-and-staged install, waiting for a restart. */
+  private staged: { script: string; dmg: string; bundle: string; logFile: string } | undefined;
+  constructor(opts: UpdaterOptions) {
+    this.opts = opts;
+    this.state = { status: "idle", current: app.getVersion() };
+  }
+
+  getState(): UpdateState { return this.state; }
+  onChange(cb: (s: UpdateState) => void): () => void {
+    this.listeners.add(cb);
+    return () => { this.listeners.delete(cb); };
+  }
+  private setState(patch: Partial<UpdateState>): void {
+    this.state = { ...this.state, ...patch };
+    for (const cb of this.listeners) cb(this.state);
+  }
 
   /** Background checks: on launch and periodically. No-op unless running as a packaged macOS app. */
   start(): void {
@@ -128,8 +155,12 @@ export class Updater {
 
   stop(): void { if (this.timer) clearInterval(this.timer); }
 
+  /**
+   * Fetch the latest release and update state. Interactive (menu) mode shows native dialogs; silent mode
+   * (background timer, sidebar icon) only updates state so the renderer can render it.
+   */
   async check(o: { interactive: boolean }): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.state.status === "downloading" || this.state.status === "ready") return;
     this.busy = true;
     try {
       const bundle = installedAppBundle();
@@ -137,17 +168,20 @@ export class Updater {
         if (o.interactive) await dialog.showMessageBox({ type: "info", message: "Updates are only available for the installed macOS app.", detail: "Move dbchat.app to /Applications (or run the installer) to enable in-app updates." });
         return;
       }
+      this.setState({ status: "checking", error: undefined });
       const current = app.getVersion();
       const latest = await fetchLatestRelease(this.opts.repo);
       const state = this.readState();
       this.writeState({ ...state, lastCheck: new Date().toISOString() });
       if (!latest || compareVersions(latest.version, current) <= 0) {
         this.log(`up to date (${current}${latest ? `, latest ${latest.version}` : ", no release"})`);
+        this.setState({ status: "idle", latest: undefined });
         if (o.interactive) await dialog.showMessageBox({ type: "info", message: "You’re up to date.", detail: `dbchat ${current} is the latest version.` });
         return;
       }
-      if (!o.interactive && state.skipped === latest.version) { this.log(`skipping ${latest.version} (dismissed)`); return; }
       this.log(`update available: ${current} → ${latest.version}`);
+      this.setState({ status: "available", latest: { version: latest.version, notes: latest.notes, url: latest.url } });
+      if (!o.interactive) return;
       const { response } = await dialog.showMessageBox({
         type: "info",
         message: `dbchat ${latest.version} is available`,
@@ -157,43 +191,73 @@ export class Updater {
         defaultId: 0,
       });
       if (response === 1) { void shell.openExternal(latest.url); return; }
-      if (response === 2) { this.writeState({ ...this.readState(), skipped: latest.version }); return; }
-      await this.downloadAndInstall(latest, bundle);
+      if (response === 2) return;
+      this.busy = false;
+      await this.download();
+      if ((this.state as UpdateState).status === "ready") {
+        const r = await dialog.showMessageBox({
+          type: "info",
+          message: `Restart to install dbchat ${latest.version}?`,
+          detail: "dbchat will quit, replace itself, and reopen in a few seconds.",
+          buttons: ["Restart Now", "Later"],
+          cancelId: 1,
+          defaultId: 0,
+        });
+        if (r.response === 0) this.install(); else this.log("install deferred by user");
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.log(`check failed: ${msg}`);
+      this.setState({ status: "error", error: msg });
       if (o.interactive) await dialog.showMessageBox({ type: "error", message: "Couldn’t check for updates", detail: msg });
     } finally {
       this.busy = false;
     }
   }
 
-  private async downloadAndInstall(rel: ReleaseInfo, bundle: string): Promise<void> {
-    const dir = mkdtempSync(join(tmpdir(), "dbchat-update-"));
-    const dmg = join(dir, `dbchat-${rel.version}-arm64.dmg`);
-    let lastPct = -1;
-    this.log(`downloading ${rel.dmgUrl}`);
-    await download(rel.dmgUrl, dmg, (p) => {
-      const pct = Math.floor(p * 100);
-      if (pct !== lastPct) { lastPct = pct; app.dock?.setBadge?.(`${pct}%`); }
-    });
-    app.dock?.setBadge?.("");
-    if (!existsSync(dmg)) throw new Error("download produced no file");
-    const script = join(dir, "swap.sh");
-    writeFileSync(script, SWAP_SCRIPT);
-    chmodSync(script, 0o755);
-    const logFile = join(app.getPath("userData"), "logs", "update.log");
-    const { response } = await dialog.showMessageBox({
-      type: "info",
-      message: `Restart to install dbchat ${rel.version}?`,
-      detail: "dbchat will quit, replace itself, and reopen in a few seconds.",
-      buttons: ["Restart Now", "Later"],
-      cancelId: 1,
-      defaultId: 0,
-    });
-    if (response !== 0) { this.log("install deferred by user"); return; }
-    this.log(`spawning swap script; target ${bundle}`);
-    const child = spawn("/bin/bash", [script, String(process.pid), dmg, bundle, logFile], { detached: true, stdio: "ignore" });
+  /** Download the available release and stage the swap script. Resolves with status "ready" (or "error"). */
+  async download(): Promise<void> {
+    if (this.busy) return;
+    const rel = this.state.latest;
+    const bundle = installedAppBundle();
+    if (!rel || !bundle || this.state.status !== "available") return;
+    this.busy = true;
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "dbchat-update-"));
+      const dmg = join(dir, `dbchat-${rel.version}-arm64.dmg`);
+      const full = await fetchLatestRelease(this.opts.repo);
+      if (!full || full.version !== rel.version) throw new Error("release changed while downloading; check again");
+      this.setState({ status: "downloading", progress: 0 });
+      let lastPct = -1;
+      this.log(`downloading ${full.dmgUrl}`);
+      await download(full.dmgUrl, dmg, (p) => {
+        const pct = Math.floor(p * 100);
+        if (pct !== lastPct) { lastPct = pct; app.dock?.setBadge?.(`${pct}%`); this.setState({ progress: p }); }
+      });
+      app.dock?.setBadge?.("");
+      if (!existsSync(dmg)) throw new Error("download produced no file");
+      const script = join(dir, "swap.sh");
+      writeFileSync(script, SWAP_SCRIPT);
+      chmodSync(script, 0o755);
+      const logFile = join(app.getPath("userData"), "logs", "update.log");
+      this.staged = { script, dmg, bundle, logFile };
+      this.setState({ status: "ready", progress: 1 });
+    } catch (e) {
+      app.dock?.setBadge?.("");
+      const msg = e instanceof Error ? e.message : String(e);
+      this.log(`download failed: ${msg}`);
+      this.setState({ status: "error", error: msg });
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Quit and run the staged swap script. No-op unless a download is ready. */
+  install(): void {
+    const st = this.staged;
+    if (!st || this.state.status !== "ready") return;
+    this.log(`spawning swap script; target ${st.bundle}`);
+    const child = spawn("/bin/bash", [st.script, String(process.pid), st.dmg, st.bundle, st.logFile], { detached: true, stdio: "ignore" });
     child.unref();
     this.opts.quit();
   }
