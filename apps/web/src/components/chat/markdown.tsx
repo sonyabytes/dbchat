@@ -2,6 +2,15 @@ import type { ReactElement, ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 import { SqlBlock } from "./sql-block";
 
 function textOf(node: ReactNode): string {
@@ -51,14 +60,23 @@ export function Markdown({ children, onOpenSql }: { children: string; onOpenSql?
       );
     },
     table: ({ children: c }) => (
-      <div className="overflow-x-auto rounded-md bg-surface shadow-hairline">
-        <table className="w-full border-separate border-spacing-0 text-[13px]">{c}</table>
+      <div className="overflow-hidden rounded-md bg-surface shadow-hairline">
+        <Table className="w-max min-w-full text-[13px]">{c}</Table>
       </div>
     ),
+    thead: ({ children: c }) => <TableHeader className="bg-inset [&_tr]:border-line-strong">{c}</TableHeader>,
+    tbody: ({ children: c }) => <TableBody className="[&_tr:nth-child(even)]:bg-inset/50">{c}</TableBody>,
+    tr: ({ children: c }) => <TableRow className="hover:bg-hover">{c}</TableRow>,
     th: ({ children: c }) => (
-      <th className="border-b border-line px-2.5 py-1.5 text-left font-medium text-ink-2">{c}</th>
+      <TableHead className="h-9 border-r border-line-strong px-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-2 last:border-r-0">
+        {c}
+      </TableHead>
     ),
-    td: ({ children: c }) => <td className="border-b border-line px-2.5 py-1.5">{c}</td>,
+    td: ({ children: c }) => (
+      <TableCell className="max-w-80 min-w-28 whitespace-normal border-r border-line px-3 py-2 align-top leading-relaxed last:border-r-0">
+        {c}
+      </TableCell>
+    ),
   };
 
   return (
