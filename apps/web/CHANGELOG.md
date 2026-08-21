@@ -1,5 +1,12 @@
 # @dbchat/web
 
+## 0.4.1
+
+### Patch Changes
+
+- 96797ad: Remove non-functional "Attach" and "Slash command" buttons from the chat prompt bar
+- @dbchat/contracts@0.4.1
+
 ## 0.4.0
 
 ### Minor Changes
