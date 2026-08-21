@@ -29,7 +29,7 @@ export const connectionApi = {
   create: (input: ConnectionInput) => callRpc((c) => c[RPC.connectionCreate](input)),
   update: (id: ConnectionId, input: ConnectionInput) => callRpc((c) => c[RPC.connectionUpdate]({ id, input })),
   remove: (id: ConnectionId) => callRpc((c) => c[RPC.connectionDelete]({ id })),
-  test: (input: ConnectionInput) => callRpc((c) => c[RPC.connectionTest](input)),
+  test: (input: ConnectionInput, id?: ConnectionId) => callRpc((c) => c[RPC.connectionTest]({ id, input })),
   connect: (id: ConnectionId) => callRpc((c) => c[RPC.connectionConnect]({ id })),
   disconnect: (id: ConnectionId) => callRpc((c) => c[RPC.connectionDisconnect]({ id })),
 };

@@ -26,6 +26,7 @@ interface FormValues {
   dialect: Dialect;
   mode: "fields" | "url";
   url: string;
+  hasStoredUrl: boolean;
   host: string;
   port: string;
   database: string;
@@ -39,22 +40,32 @@ interface FormValues {
 const defaultPort = (d: Dialect) => (d === "mysql" ? "3306" : d === "postgres" ? "5432" : "");
 
 const emptyValues = (): FormValues => ({
-  name: "", dialect: "postgres", mode: "fields", url: "", host: "localhost", port: "5432",
+  name: "", dialect: "postgres", mode: "fields", url: "", hasStoredUrl: false, host: "localhost", port: "5432",
   database: "", user: "", password: "", env: "local", ssl: "prefer", readOnlyForAi: true,
 });
 
-const fromConnection = (c: Connection): FormValues => ({
-  name: c.name, dialect: c.dialect, mode: "fields", url: "",
-  host: c.host, port: String(c.port || defaultPort(c.dialect)), database: c.database, user: c.user,
-  password: "", env: c.env, ssl: c.ssl, readOnlyForAi: c.readOnlyForAi,
-});
+const fromConnection = (c: Connection): FormValues => {
+  // URL-created connections intentionally have no public host/user/database
+  // metadata because their URL is encrypted with the other secrets.
+  const hasStoredUrl = c.dialect !== "sqlite" && !c.host.trim() && !c.database.trim() && !c.user.trim();
+  return {
+    name: c.name, dialect: c.dialect, mode: hasStoredUrl ? "url" : "fields", url: "", hasStoredUrl,
+    host: c.host, port: String(c.port || defaultPort(c.dialect)), database: c.database, user: c.user,
+    password: "", env: c.env, ssl: c.ssl, readOnlyForAi: c.readOnlyForAi,
+  };
+};
 
 function toConnectionInput(v: FormValues): ConnectionInput {
   const base = { name: v.name.trim(), dialect: v.dialect, env: v.env, ssl: v.ssl, readOnlyForAi: v.readOnlyForAi };
-  if (v.dialect === "sqlite") return { ...base, database: v.database.trim() };
-  if (v.mode === "url") return { ...base, url: v.url.trim() };
+  if (v.dialect === "sqlite") return { ...base, database: v.database.trim(), url: "" };
+  if (v.mode === "url") {
+    const url = v.url.trim();
+    return { ...base, ...(url ? { url } : v.hasStoredUrl ? {} : { url: "" }) };
+  }
   return {
     ...base,
+    // Explicitly clear a previously stored URL so individual fields take over.
+    url: "",
     host: v.host.trim(),
     port: Number(v.port),
     database: v.database.trim(),
@@ -74,8 +85,8 @@ function validate({ value }: { value: FormValues }) {
   } else if (value.mode === "url") {
     const u = value.url.trim();
     const scheme = value.dialect === "mysql" ? /^mysql:\/\// : /^postgres(ql)?:\/\//;
-    if (!u) fields.url = "Required";
-    else if (!scheme.test(u)) fields.url = value.dialect === "mysql" ? "Must start with mysql://" : "Must start with postgres://";
+    if (!u && !value.hasStoredUrl) fields.url = "Required";
+    else if (u && !scheme.test(u)) fields.url = value.dialect === "mysql" ? "Must start with mysql://" : "Must start with postgres://";
   } else {
     if (!value.host.trim()) fields.host = "Required";
     const port = Number(value.port);
@@ -136,7 +147,7 @@ export function ConnectionFormDialog({
   const runTest = async () => {
     setTest({ state: "testing" });
     try {
-      const result = await connectionApi.test(toConnectionInput(form.state.values));
+      const result = await connectionApi.test(toConnectionInput(form.state.values), connection?.id);
       // Server version strings are long ("PostgreSQL 18.3 (Homebrew) on aarch64-… compiled by …").
       const version = result.serverVersion?.split(",")[0]?.split(" on ")[0]?.trim();
       setTest(
@@ -169,6 +180,7 @@ export function ConnectionFormDialog({
                     key={d}
                     type="button"
                     onClick={() => {
+                      if (d !== field.state.value) form.setFieldValue("hasStoredUrl", false);
                       field.handleChange(d);
                       form.setFieldValue("port", defaultPort(d));
                       if (d === "sqlite") form.setFieldValue("mode", "fields");

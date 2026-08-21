@@ -118,6 +118,53 @@ describe("ConnectionStoreLive", () => {
     expect(Option.getOrThrow(result)).toEqual({ password: "newpass" });
   });
 
+  test("update keeps a stored URL when an edit omits it", async () => {
+    const { result } = await run((store) =>
+      Effect.gen(function* () {
+        const created = yield* store.create({
+          ...pgInput,
+          host: undefined,
+          port: undefined,
+          database: undefined,
+          user: undefined,
+          password: undefined,
+          url: "postgres://u:p@h/db",
+        });
+        const updated = yield* store.update(created.id, {
+          name: "renamed URL",
+          dialect: "postgres",
+          env: "staging",
+          ssl: "require",
+          readOnlyForAi: false,
+        });
+        return { updated, secret: yield* store.getSecret(created.id) };
+      }),
+    );
+    expect(result.updated.name).toBe("renamed URL");
+    expect(Option.getOrThrow(result.secret)).toEqual({ url: "postgres://u:p@h/db" });
+  });
+
+  test("an explicitly blank URL switches a URL connection to fields", async () => {
+    const { result } = await run((store) =>
+      Effect.gen(function* () {
+        const created = yield* store.create({
+          ...pgInput,
+          host: undefined,
+          port: undefined,
+          database: undefined,
+          user: undefined,
+          password: undefined,
+          url: "postgres://u:p@h/db",
+        });
+        const updated = yield* store.update(created.id, { ...pgInput, password: undefined, url: "" });
+        return { updated, secret: yield* store.getSecret(created.id) };
+      }),
+    );
+    expect(result.updated.host).toBe("127.0.0.1");
+    expect(result.updated.database).toBe("dbchat_dev");
+    expect(Option.isNone(result.secret)).toBe(true);
+  });
+
   test("touch stamps lastUsedAt", async () => {
     const { result } = await run((store) =>
       Effect.gen(function* () {

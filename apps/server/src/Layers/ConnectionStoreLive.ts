@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import { SecretCipher, SecretCipherLive } from "../db/secrets.ts";
 import { DEFAULT_PORT, validateConnectionInput } from "../db/validate.ts";
 import { Persistence } from "../persistence/Persistence.ts";
-import { type ConnectionSecret, ConnectionStore } from "../Services/ConnectionStore.ts";
+import { type ConnectionSecret, ConnectionStore, mergeConnectionSecret } from "../Services/ConnectionStore.ts";
 
 const DEFAULT_COLOR = "oklch(62.6% 0.205 254.947)";
 
@@ -101,6 +101,9 @@ export const ConnectionStoreLive = Layer.effect(
         `;
       }).pipe(die);
 
+    const deleteSecret = (id: ConnectionId) =>
+      die(sql`DELETE FROM connection_secrets WHERE connection_id = ${id}`).pipe(Effect.asVoid);
+
     const row = (input: ConnectionInput) => ({
       name: input.name.trim(),
       dialect: input.dialect,
@@ -135,28 +138,31 @@ export const ConnectionStoreLive = Layer.effect(
 
     const update = (id: ConnectionId, input: ConnectionInput) =>
       Effect.gen(function* () {
-        const problem = validateConnectionInput(input);
-        if (problem) return yield* Effect.fail(problem);
         const previous = yield* get(id);
+        const storedSecret = Option.getOrUndefined(yield* getSecret(id));
+        const effectiveInput = mergeConnectionSecret(input, storedSecret);
+        const problem = validateConnectionInput(effectiveInput);
+        if (problem) return yield* Effect.fail(problem);
         const r = row(input);
+        const suppliedUrl = input.url?.trim();
+        const switchedToUrl = suppliedUrl !== undefined && suppliedUrl.length > 0;
         yield* die(sql`
           UPDATE connections SET
             name = ${r.name},
             dialect = ${r.dialect},
-            host = ${input.host ?? previous.host},
-            port = ${input.port ?? previous.port},
-            "database" = ${input.database ?? previous.database},
-            "user" = ${input.user ?? previous.user},
+            host = ${switchedToUrl ? "" : input.host ?? previous.host},
+            port = ${switchedToUrl ? DEFAULT_PORT[input.dialect] : input.port ?? previous.port},
+            "database" = ${switchedToUrl ? "" : input.database ?? previous.database},
+            "user" = ${switchedToUrl ? "" : input.user ?? previous.user},
             env = ${r.env},
             ssl = ${r.ssl},
             read_only_for_ai = ${r.readOnly},
             color = ${input.color ?? previous.color}
           WHERE id = ${id}
         `);
-        // Only replace the stored secret when the caller actually sent one, so
-        // editing a connection does not require retyping the password.
-        const secret = secretFrom(input);
+        const secret = secretFrom(effectiveInput);
         if (secret) yield* writeSecret(id, secret);
+        else yield* deleteSecret(id);
         return yield* get(id).pipe(Effect.orDie);
       });
 
