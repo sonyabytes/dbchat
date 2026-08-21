@@ -41,14 +41,18 @@ export function PromptBar({
   onModelChange?: (modelId: string) => void;
 }) {
   const [value, setValue] = useState("");
-  const [mention, setMention] = useState<string | null>(null);
+  /** Active `@` token under the caret: `[start, end)` in `value`, plus the typed query. */
+  const [mention, setMention] = useState<{ start: number; end: number; query: string } | null>(null);
   const [hi, setHi] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const pendingCaret = useRef<number | null>(null);
 
   const matches =
     mention === null
       ? []
-      : tables.filter((t) => `${t.schema}.${t.name}`.toLowerCase().includes(mention.toLowerCase())).slice(0, 5);
+      : tables
+          .filter((t) => `${t.schema}.${t.name}`.toLowerCase().includes(mention.query.toLowerCase()))
+          .slice(0, 5);
   const chips = tables.slice(0, 3).map((t) => ({
     label: t.schema === "public" ? t.name : `${t.schema}.${t.name}`,
     insert: `${t.schema}.${t.name}`,
@@ -58,6 +62,39 @@ export function PromptBar({
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
 
+  // Restore the caret after programmatic inserts (React resets it to the end on value change).
+  useEffect(() => {
+    const caret = pendingCaret.current;
+    if (caret === null || !ref.current) return;
+    pendingCaret.current = null;
+    ref.current.setSelectionRange(caret, caret);
+  }, [value]);
+
+  /** Find an `@token` that ends at the caret; `@` must start the text or follow whitespace. */
+  const mentionAt = (text: string, caret: number) => {
+    const m = /(^|\s)@([\w.]*)$/.exec(text.slice(0, caret));
+    if (!m) return null;
+    const start = caret - (m[2] ?? "").length - 1;
+    return { start, end: caret, query: m[2] ?? "" };
+  };
+
+  const syncMention = (text: string, caret: number) => {
+    setMention(mentionAt(text, caret));
+    setHi(0);
+  };
+
+  /** Insert `text` at the caret (or replace `[start, end)`), keeping the caret after the insert. */
+  const insertAtCaret = (text: string, range?: { start: number; end: number }) => {
+    const el = ref.current;
+    const start = range?.start ?? el?.selectionStart ?? value.length;
+    const end = range?.end ?? el?.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + text + value.slice(end);
+    pendingCaret.current = start + text.length;
+    setValue(next);
+    el?.focus();
+    return { next, caret: start + text.length };
+  };
+
   const send = () => {
     if (!value.trim() || disabled) return;
     onSend?.(value.trim());
@@ -66,9 +103,8 @@ export function PromptBar({
   };
 
   const accept = (t: MentionTable) => {
-    setValue((v) => v.replace(/@[\w.]*$/, `@${t.schema}.${t.name} `));
+    insertAtCaret(`@${t.schema}.${t.name} `, mention ?? undefined);
     setMention(null);
-    ref.current?.focus();
   };
 
   return (
@@ -125,9 +161,13 @@ export function PromptBar({
         value={value}
         onChange={(e) => {
           setValue(e.target.value);
-          const m = /@([\w.]*)$/.exec(e.target.value);
-          setMention(m ? (m[1] ?? "") : null);
-          setHi(0);
+          syncMention(e.target.value, e.target.selectionStart);
+        }}
+        onClick={(e) => syncMention(value, e.currentTarget.selectionStart)}
+        onKeyUp={(e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End") {
+            syncMention(value, e.currentTarget.selectionStart);
+          }
         }}
         onKeyDown={(e) => {
           if (matches.length > 0) {
@@ -174,9 +214,11 @@ export function PromptBar({
           size="icon-xs"
           aria-label="Mention table"
           onClick={() => {
-            setValue((v) => `${v}@`);
-            setMention("");
-            ref.current?.focus();
+            const el = ref.current;
+            const at = el?.selectionStart ?? value.length;
+            const needsSpace = at > 0 && !/\s/.test(value[at - 1] ?? "");
+            const { next, caret } = insertAtCaret(needsSpace ? " @" : "@");
+            syncMention(next, caret);
           }}
         >
           <AtSign />
@@ -193,7 +235,12 @@ export function PromptBar({
               <button
                 key={c.insert}
                 type="button"
-                onClick={() => setValue((v) => `${v}@${c.insert} `)}
+                onClick={() => {
+                  const el = ref.current;
+                  const at = el?.selectionStart ?? value.length;
+                  const needsSpace = at > 0 && !/\s/.test(value[at - 1] ?? "");
+                  insertAtCaret(`${needsSpace ? " " : ""}@${c.insert} `);
+                }}
                 className="truncate rounded-sm bg-inset px-1.5 py-0.5 font-mono text-[11px] text-ink-2 hover:bg-hover-2"
               >
                 @{c.label}
