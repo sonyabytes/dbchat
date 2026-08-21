@@ -60,4 +60,13 @@ describe("other settings", () => {
     expect(stored.version).toBe(1);
     expect(stored.state).toMatchObject({ rowLimit: 1000, pageSize: 200, confirmDml: false, defaultModel: "claude-sonnet-5" });
   });
+
+  test("per-provider models are remembered independently of the global default", () => {
+    useSettings.getState().setProviderModel("openai", "gpt-5.3-codex");
+    useSettings.getState().setDefaultModel("claude-opus-5", "anthropic");
+    expect(useSettings.getState().providerModels).toEqual({ openai: "gpt-5.3-codex", anthropic: "claude-opus-5" });
+    expect(useSettings.getState().defaultModel).toBe("claude-opus-5");
+    useSettings.getState().setProviderModel("openai", null);
+    expect(useSettings.getState().providerModels).toEqual({ anthropic: "claude-opus-5" });
+  });
 });

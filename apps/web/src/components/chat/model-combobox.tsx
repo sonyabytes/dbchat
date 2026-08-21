@@ -1,4 +1,4 @@
-import type { ProviderModels } from "@dbchat/contracts";
+import type { ProviderId, ProviderModels } from "@dbchat/contracts";
 import { Check, ChevronsUpDown, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
 
@@ -24,6 +24,7 @@ export function ModelCombobox({
   serverDefaultLabel,
   align = "end",
   side = "bottom",
+  provider,
 }: {
   catalog: ReadonlyArray<ProviderModels> | undefined;
   value: string | null | undefined;
@@ -32,7 +33,10 @@ export function ModelCombobox({
   serverDefaultLabel?: string | undefined;
   align?: "start" | "center" | "end";
   side?: "top" | "bottom" | "left" | "right" | "inline-start" | "inline-end";
+  /** Only list this provider's models. */
+  provider?: ProviderId | undefined;
 }) {
+  const providers = (catalog ?? []).filter((p) => !provider || p.provider === provider);
   const [open, setOpen] = useState(false);
   const selected = findModel(catalog, value);
   const label = selected?.label ?? (includeServerDefault ? `Server default${serverDefaultLabel ? ` · ${serverDefaultLabel}` : ""}` : "Choose a model");
@@ -74,14 +78,14 @@ export function ModelCombobox({
                 </CommandItem>
               </CommandGroup>
             ) : null}
-            {(catalog ?? []).map((provider) => {
-              const unavailable = provider.status !== "ready";
+            {providers.map((group) => {
+              const unavailable = group.status !== "ready";
               return (
-                <CommandGroup key={provider.provider} heading={`${provider.label}${unavailable ? " · unavailable" : ""}`}>
-                  {provider.models.map((model) => (
+                <CommandGroup key={group.provider} heading={`${group.label}${unavailable ? " · unavailable" : ""}`}>
+                  {group.models.map((model) => (
                     <CommandItem
                       key={model.id}
-                      value={`${provider.label} ${model.label} ${model.id} ${model.tier}`}
+                      value={`${group.label} ${model.label} ${model.id} ${model.tier}`}
                       disabled={unavailable}
                       data-checked={model.id === value}
                       onSelect={() => choose(model.id)}
@@ -95,7 +99,7 @@ export function ModelCombobox({
                           {model.default ? <span className="text-muted-foreground">server default</span> : null}
                         </span>
                         {model.description ? <span className="mt-0.5 block text-muted-foreground">{model.description}</span> : null}
-                        {unavailable ? <span className="mt-0.5 block text-muted-foreground">{provider.reason}</span> : null}
+                        {unavailable ? <span className="mt-0.5 block text-muted-foreground">{group.reason}</span> : null}
                       </span>
                     </CommandItem>
                   ))}

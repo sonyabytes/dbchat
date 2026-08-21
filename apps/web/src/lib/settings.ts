@@ -6,6 +6,7 @@
  * and a couple of icons read that). `initTheme()` runs once from main.tsx and
  * subscribes to the OS preference so "system" stays live.
  */
+import type { ProviderId } from "@dbchat/contracts";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -45,6 +46,8 @@ interface SettingsState {
   autoTableContext: boolean;
   /** Preferred model id for new chats; `null` = whatever the server defaults to. */
   defaultModel: string | null;
+  /** Preferred model per provider; `defaultModel` is the one from the provider used for new chats. */
+  providerModels: Partial<Record<ProviderId, string>>;
   setTheme: (t: ThemePref) => void;
   setFontScale: (n: FontScale) => void;
   setUiFont: (p: UiFontPreset, custom?: string) => void;
@@ -53,7 +56,9 @@ interface SettingsState {
   setPageSize: (n: PageSize) => void;
   setConfirmDml: (v: boolean) => void;
   setAutoTableContext: (v: boolean) => void;
-  setDefaultModel: (id: string | null) => void;
+  /** Pass `provider` to also remember the pick as that provider's model. */
+  setDefaultModel: (id: string | null, provider?: ProviderId) => void;
+  setProviderModel: (provider: ProviderId, id: string | null) => void;
 }
 
 export const useSettings = create<SettingsState>()(
@@ -70,6 +75,7 @@ export const useSettings = create<SettingsState>()(
       confirmDml: true,
       autoTableContext: true,
       defaultModel: null,
+      providerModels: {},
       setTheme: (theme) => {
         set({ theme });
         applyTheme(theme);
@@ -90,7 +96,18 @@ export const useSettings = create<SettingsState>()(
       setPageSize: (pageSize) => set({ pageSize }),
       setConfirmDml: (confirmDml) => set({ confirmDml }),
       setAutoTableContext: (autoTableContext) => set({ autoTableContext }),
-      setDefaultModel: (defaultModel) => set({ defaultModel }),
+      setDefaultModel: (defaultModel, provider) =>
+        set((s) => ({
+          defaultModel,
+          providerModels: provider && defaultModel ? { ...s.providerModels, [provider]: defaultModel } : s.providerModels,
+        })),
+      setProviderModel: (provider, id) =>
+        set((s) => {
+          const providerModels = { ...s.providerModels };
+          if (id) providerModels[provider] = id;
+          else delete providerModels[provider];
+          return { providerModels };
+        }),
     }),
     {
       // Stays at 1: new keys merge in from the initial state, and bumping the

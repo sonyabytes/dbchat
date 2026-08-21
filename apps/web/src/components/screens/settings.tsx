@@ -38,7 +38,7 @@ import {
   useSettings,
 } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { catalogDefaultModel, modelsQuery } from "@/rpc/ai";
+import { catalogDefaultModel, findModel, modelsQuery } from "@/rpc/ai";
 
 type SettingsPage = "general" | "appearance" | "providers" | "keybindings";
 
@@ -117,6 +117,19 @@ export function SettingsScreen() {
   const [provider, setProvider] = useState<ProviderId>("anthropic");
   const activeNav = NAV_ITEMS.find((item) => item.id === page)!;
   const selectedProvider = catalog?.find((item) => item.provider === provider);
+  /* The provider new chats use: whoever owns the user's default model, else the server default's owner. */
+  const defaultProvider = (findModel(catalog, settings.defaultModel) ?? serverDefault)?.provider;
+  const isDefaultProvider = defaultProvider === provider;
+  /* This provider's pick: the saved one, else the server default when it belongs here, else its first model. */
+  const providerModel =
+    settings.providerModels[provider] ?? (serverDefault?.provider === provider ? serverDefault.id : selectedProvider?.models[0]?.id) ?? null;
+  const chooseProviderModel = (id: string | null) => {
+    settings.setProviderModel(provider, id);
+    if (isDefaultProvider) settings.setDefaultModel(id, provider);
+  };
+  const useProviderForNewChats = () => {
+    if (providerModel) settings.setDefaultModel(providerModel, provider);
+  };
 
   const back = () => {
     if (router.history.canGoBack()) router.history.back();
@@ -297,8 +310,16 @@ export function SettingsScreen() {
                 </div>
 
                 <SettingsCard title={`${selectedProvider?.label ?? "Provider"} settings`} description={selectedProvider?.reason ?? PROVIDER_META[provider].summary}>
-                  <SettingRow label="Default model" hint={serverDefault ? `Server default is ${serverDefault.label}. Each chat remembers its last model.` : "Each chat remembers its last model."}>
-                    <ModelCombobox catalog={catalog} value={settings.defaultModel} onChange={settings.setDefaultModel} includeServerDefault serverDefaultLabel={serverDefault?.label} />
+                  <SettingRow label="Default model" hint={`Used when ${selectedProvider?.label ?? "this provider"} powers a new chat. Each chat remembers its last model.`}>
+                    <ModelCombobox catalog={catalog} value={providerModel} onChange={chooseProviderModel} provider={provider} />
+                  </SettingRow>
+                  <SettingRow
+                    label="Use for new chats"
+                    hint={isDefaultProvider ? `New chats start on ${findModel(catalog, providerModel)?.label ?? "this model"}.` : `New chats currently use ${catalog?.find((item) => item.provider === defaultProvider)?.label ?? "the server default"}.`}
+                  >
+                    <Button variant="outline" size="sm" disabled={isDefaultProvider || selectedProvider?.status !== "ready" || !providerModel} onClick={useProviderForNewChats}>
+                      {isDefaultProvider ? <><Check className="text-brand" /> Default</> : `Use ${selectedProvider?.label ?? "provider"}`}
+                    </Button>
                   </SettingRow>
                   {provider === "anthropic" ? <><Separator /><ClaudeRuntimeSection /></> : (
                     <p className="rounded-md bg-inset p-3 text-xs text-muted-foreground">
