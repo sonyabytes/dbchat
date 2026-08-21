@@ -20,6 +20,7 @@ describe("quoteIdent", () => {
 
   test("mysql uses backticks", () => {
     expect(quoteIdent("mysql", "users")).toBe("`users`");
+    expect(quoteIdent("bigquery", "users")).toBe("`users`");
   });
 
   test("embedded quote characters are doubled", () => {
@@ -66,6 +67,10 @@ describe("buildRowsQuery", () => {
     const q = buildRowsQuery("mysql", req({ schema: "app", filters: [{ column: "plan", op: "eq", value: "pro" }] }));
     expect(q.text).toBe("SELECT * FROM `app`.`users` WHERE `plan` = ? LIMIT 50 OFFSET 0");
     expect(q.params).toEqual(["pro"]);
+
+    const bigquery = buildRowsQuery("bigquery", req({ schema: "analytics", filters: [{ column: "plan", op: "eq", value: "pro" }] }));
+    expect(bigquery.text).toBe("SELECT * FROM `analytics`.`users` WHERE `plan` = ? LIMIT 50 OFFSET 0");
+    expect(bigquery.params).toEqual(["pro"]);
   });
 
   test("null checks take no parameter", () => {

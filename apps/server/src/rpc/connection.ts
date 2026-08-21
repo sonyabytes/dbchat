@@ -1,5 +1,5 @@
 /** connection.* handlers. Self-contained: only depends on Services/*. */
-import { DbchatRpcs, RPC } from "@dbchat/contracts";
+import { DbchatRpcs, RPC, ValidationError } from "@dbchat/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -26,9 +26,15 @@ export const connectionHandlers = Effect.gen(function* () {
     [RPC.connectionTest]: ({ id, input }) =>
       id === undefined
         ? drivers.test(input)
-        : store.getSecret(id).pipe(
-            Effect.map(Option.getOrUndefined),
-            Effect.map((secret) => mergeConnectionSecret(input, secret)),
+        : Effect.all([
+            store.get(id).pipe(
+              Effect.mapError(() => new ValidationError({ field: "id", message: "connection not found" })),
+            ),
+            store.getSecret(id),
+          ]).pipe(
+            Effect.map(([connection, secret]) =>
+              mergeConnectionSecret(input, connection.dialect === input.dialect ? Option.getOrUndefined(secret) : undefined),
+            ),
             Effect.flatMap(drivers.test),
           ),
     /** connect = open (or reuse) the driver, ping it, then stamp `lastUsedAt`. */
