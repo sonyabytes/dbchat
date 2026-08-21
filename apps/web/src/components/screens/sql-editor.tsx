@@ -87,9 +87,12 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
   const qc = useQueryClient();
   const dark = useApp((s) => s.dark);
   const connection = useApp((s) => s.connection);
+  const setSqlDraft = useApp((s) => s.setSqlDraft);
+  const clearSqlDraft = useApp((s) => s.clearSqlDraft);
   const currentThread = useChat((s) => s.currentThread[connectionId]);
 
-  const [code, setCode] = useState(search.sql ?? "");
+  const [initialDraft] = useState(() => useApp.getState().getSqlDraft(connectionId, queryId));
+  const [code, setCode] = useState(() => search.sql ?? initialDraft ?? "");
   const [runId, setRunId] = useState<string | null>(null);
   const [result, setResult] = useState<SqlResult | null>(null);
   const [error, setError] = useState<RpcErrorInfo | null>(null);
@@ -113,13 +116,21 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
 
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const suggestGen = useRef(0);
-  const loadedFor = useRef<string | null>(search.sql ? "prefill" : null);
+  const loadedFor = useRef<string | null>(search.sql ? "prefill" : initialDraft !== undefined ? "draft" : null);
+
+  /* Explicit editor prefills win over a prior draft and become the new draft. */
+  useEffect(() => {
+    if (!search.sql) return;
+    loadedFor.current = "prefill";
+    setCode(search.sql);
+    setSqlDraft(connectionId, queryId, search.sql);
+  }, [connectionId, queryId, search.sql, setSqlDraft]);
 
   /* ---------- saved query loading ---------- */
   const { data: savedList } = useQuery(savedQueriesQuery(connectionId));
   const savedQuery = savedList?.find((s) => s.id === queryId);
   useEffect(() => {
-    if (queryId !== "new" && savedQuery && loadedFor.current !== savedQuery.id) {
+    if (queryId !== "new" && savedQuery && loadedFor.current === null) {
       loadedFor.current = savedQuery.id;
       setCode(savedQuery.sql);
     }
@@ -245,6 +256,7 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
     try {
       const q = await saveQuery({ connectionId, name, sql: code, ...(queryId === "new" ? {} : { id: queryId }) });
       void qc.invalidateQueries({ queryKey: savedKey(connectionId) });
+      clearSqlDraft(connectionId, queryId);
       setSaveOpen(false);
       loadedFor.current = q.id;
       void navigate({ to: "/c/$connectionId/sql/$queryId", params: { connectionId, queryId: q.id }, search: {} });
@@ -348,6 +360,7 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
           connectionId={connectionId}
           onPick={(s) => {
             setCode(s);
+            setSqlDraft(connectionId, queryId, s);
             loadedFor.current = "history";
           }}
         />
@@ -417,6 +430,7 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
             value={code}
             onChange={(value, vu) => {
               setCode(value);
+              setSqlDraft(connectionId, queryId, value);
               setSuggestion(null);
               suggestGen.current += 1;
               const head = vu.state.selection.main.head;

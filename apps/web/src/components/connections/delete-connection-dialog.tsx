@@ -5,6 +5,7 @@ import type { Connection } from "@dbchat/contracts";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useApp } from "@/lib/store";
 import { connectionApi, connectionKeys } from "@/rpc/connections";
 import { rpcErrorMessage } from "@/rpc/queries";
 
@@ -25,6 +26,7 @@ export function DeleteConnectionDialog({
     setError(null);
     try {
       await connectionApi.remove(connection.id);
+      useApp.getState().removeConnectionWorkspace(connection.id);
       await queryClient.invalidateQueries({ queryKey: connectionKeys.list });
       queryClient.removeQueries({ queryKey: connectionKeys.connect(connection.id) });
       onOpenChange(false);
@@ -41,7 +43,8 @@ export function DeleteConnectionDialog({
         <DialogHeader>
           <DialogTitle>Delete “{connection?.name}”?</DialogTitle>
           <DialogDescription>
-            The stored credentials are removed from this machine. The database itself is untouched.
+            This permanently removes the stored credentials, saved queries, query history, and chats for this
+            connection from dbchat. The database itself is untouched.
           </DialogDescription>
         </DialogHeader>
         {error && <div className="rounded-md bg-danger-tint px-3 py-2 text-xs text-danger">{error}</div>}

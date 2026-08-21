@@ -8,7 +8,7 @@
     "dev": "vite --port 5173 --strictPort",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
-    "test": "echo no tests",
+    "test": "bun test",
     "lint": "oxlint",
     "preview": "vite preview"
   },

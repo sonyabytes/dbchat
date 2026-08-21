@@ -24,7 +24,7 @@ function SqlRoute() {
         ? "untitled.sql"
         : `${queryId}.sql`;
   useRegisterTab({ id: tabIds.sql(queryId), kind: "sql", queryId, title });
-  return <SqlEditor key={queryId} queryId={queryId} />;
+  return <SqlEditor key={`${connectionId}:${queryId}`} queryId={queryId} />;
 }
 
 export const Route = createFileRoute("/c/$connectionId/sql/$queryId")({
