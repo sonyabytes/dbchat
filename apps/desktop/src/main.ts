@@ -16,6 +16,7 @@ import { installAppMenu } from "./menu.ts";
 import { hasSidecar, hasWebDist, isPackaged, paths } from "./paths.ts";
 import { APP_ORIGIN, registerAppScheme, serveWebDist } from "./protocol.ts";
 import { Sidecar, waitForHealth } from "./sidecar.ts";
+import { Updater } from "./updater.ts";
 import { createMainWindow, syncNativeTheme } from "./window.ts";
 
 const argv = process.argv.slice(1);
@@ -24,6 +25,7 @@ const smokePath = argv.find((a) => a.startsWith("--smoke-path="))?.slice("--smok
 const smokeOut = resolve(argv.find((a) => a.startsWith("--smoke-out="))?.slice("--smoke-out=".length) ?? join(process.cwd(), "smoke.png"));
 const DEV_URL = process.env.DBCHAT_DEV_URL;
 const isDev = !isPackaged;
+const UPDATE_REPO = process.env.DBCHAT_UPDATE_REPO ?? "sonyabytes/dbchat";
 
 app.setName("dbchat");
 if (SMOKE) app.setPath("userData", mkdtempSync(join(tmpdir(), "dbchat-smoke-")));
@@ -40,6 +42,7 @@ if (!SMOKE && !app.requestSingleInstanceLock()) {
 
 let sidecar: Sidecar | undefined;
 let mainWindow: BrowserWindow | undefined;
+let updater: Updater | undefined;
 const log = (line: string) => {
   const msg = `[desktop] ${line}`;
   console.log(msg);
@@ -117,7 +120,10 @@ async function runSmoke(win: BrowserWindow, httpUrl: string): Promise<void> {
 
 async function main(): Promise<void> {
   await app.whenReady();
-  installAppMenu({ isDev });
+  if (!SMOKE && !DEV_URL) {
+    updater = new Updater({ repo: UPDATE_REPO, stateFile: paths.updaterState(), log, quit: () => app.quit() });
+  }
+  installAppMenu({ isDev, checkForUpdates: updater ? () => void updater?.check({ interactive: true }) : undefined });
   const server = await resolveServer();
   const url = new URL(server.appUrl);
   if (SMOKE && smokePath) url.pathname = smokePath;
@@ -129,6 +135,7 @@ async function main(): Promise<void> {
   nativeTheme.on("updated", () => {});
 
   await mainWindow.loadURL(url.toString());
+  updater?.start();
   if (SMOKE) {
     try {
       await runSmoke(mainWindow, server.httpUrl);
