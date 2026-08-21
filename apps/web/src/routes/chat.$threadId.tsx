@@ -16,7 +16,7 @@ function GlobalChatRoute() {
   const { threadId } = Route.useParams();
   const { data: threads } = useQuery(threadListQuery);
   const existing = useApp((state) => state.workspaces.global?.tabs.find((tab) => tab.id === tabIds.chat(threadId)));
-  const title = threads?.find((thread) => thread.id === threadId)?.title ?? (existing?.kind === "chat" ? existing.title : "New chat");
+  const title = threads?.find((thread) => thread.id === threadId)?.title ?? (existing?.kind === "chat" ? existing.title : "New work item");
   useRegisterTab({ id: tabIds.chat(threadId), kind: "chat", threadId, title });
   return <HomeWorkspace><ChatView key={threadId} threadId={threadId} /></HomeWorkspace>;
 }

@@ -1,14 +1,62 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { type Tab, tabIds, tabPath, useApp } from "./store.ts";
+import { type DataTab, type Tab, dataTabIds, tabIds, tabPath, useApp } from "./store.ts";
 
 const sql = (id: string, title = `${id}.sql`): Extract<Tab, { kind: "sql" }> => ({ id: tabIds.sql(id), kind: "sql", queryId: id, title });
 const chat = (id: string, title = "New chat"): Extract<Tab, { kind: "chat" }> => ({ id: tabIds.chat(id), kind: "chat", threadId: id, title });
 const table = (schema: string, name: string): Extract<Tab, { kind: "table" }> => ({ id: tabIds.table(schema, name), kind: "table", schema, table: name });
+const dataTable = (connectionId: string, schema: string, name: string): Extract<DataTab, { kind: "table" }> => ({
+  id: dataTabIds.table(connectionId, schema, name),
+  kind: "table",
+  connectionId,
+  schema,
+  table: name,
+});
+const dataSql = (connectionId: string, queryId: string): Extract<DataTab, { kind: "sql" }> => ({
+  id: dataTabIds.sql(connectionId, queryId),
+  kind: "sql",
+  connectionId,
+  queryId,
+  title: "untitled.sql",
+});
 
 beforeEach(() => {
   localStorage.clear();
-  useApp.setState({ connection: null, tabsConnectionId: null, tabs: [], activeTab: null, workspaces: {}, sqlDrafts: {} });
+  useApp.setState({ connection: null, tabsConnectionId: null, tabs: [], activeTab: null, workspaces: {}, sqlDrafts: {}, dataWorkspaces: {} });
+});
+
+describe("work item data workspaces", () => {
+  test("keeps table and SQL tabs isolated per work item", () => {
+    const users = dataTable("c1", "public", "users");
+    const query = dataSql("c2", "draft-1");
+
+    useApp.getState().openDataTab("work-a", users);
+    useApp.getState().openDataTab("work-b", query);
+
+    expect(useApp.getState().dataWorkspaces["work-a"]).toEqual({ tabs: [users], activeTab: users.id });
+    expect(useApp.getState().dataWorkspaces["work-b"]).toEqual({ tabs: [query], activeTab: query.id });
+  });
+
+  test("closing an active data tab selects its left neighbour", () => {
+    const users = dataTable("c1", "public", "users");
+    const query = dataSql("c1", "draft-1");
+    useApp.getState().openDataTab("work-a", users);
+    useApp.getState().openDataTab("work-a", query);
+
+    useApp.getState().closeDataTab("work-a", query.id);
+
+    expect(useApp.getState().dataWorkspaces["work-a"]).toEqual({ tabs: [users], activeTab: users.id });
+  });
+
+  test("moves draft workspace state to the persisted thread", () => {
+    const users = dataTable("c1", "public", "users");
+    useApp.getState().openDataTab("new-draft", users);
+
+    useApp.getState().moveDataWorkspace("new-draft", "thread-1");
+
+    expect(useApp.getState().dataWorkspaces["new-draft"]).toBeUndefined();
+    expect(useApp.getState().dataWorkspaces["thread-1"]).toEqual({ tabs: [users], activeTab: users.id });
+  });
 });
 
 describe("tabIds / tabPath", () => {
@@ -135,10 +183,12 @@ describe("per-connection workspaces", () => {
     const query = sql("draft-a", "untitled.sql");
     useApp.getState().openTab(query, "connection-a");
     useApp.getState().setSqlDraft("connection-a", query.queryId, "select now()");
+    useApp.getState().openDataTab("work-a", dataTable("connection-a", "public", "users"));
 
     const saved = JSON.parse(localStorage.getItem("dbchat.workspaces") ?? "{}") as { state?: Record<string, unknown> };
     expect(saved.state?.workspaces).toBeDefined();
     expect(saved.state?.sqlDrafts).toBeDefined();
+    expect(saved.state?.dataWorkspaces).toBeDefined();
     expect(saved.state?.connection).toBeUndefined();
     expect(saved.state?.tabs).toBeUndefined();
   });
@@ -147,11 +197,14 @@ describe("per-connection workspaces", () => {
     const query = sql("draft-a", "untitled.sql");
     useApp.getState().openTab(query, "connection-a");
     useApp.getState().setSqlDraft("connection-a", query.queryId, "select 1");
+    useApp.getState().openDataTab("work-a", dataTable("connection-a", "public", "users"));
+    useApp.getState().openDataTab("work-a", dataTable("connection-b", "public", "orders"));
 
     useApp.getState().removeConnectionWorkspace("connection-a");
 
     expect(useApp.getState().restorableTab("connection-a")).toBeNull();
     expect(useApp.getState().getSqlDraft("connection-a", query.queryId)).toBeUndefined();
+    expect(useApp.getState().dataWorkspaces["work-a"]?.tabs).toEqual([dataTable("connection-b", "public", "orders")]);
     expect(useApp.getState().tabsConnectionId).toBeNull();
     expect(useApp.getState().tabs).toEqual([]);
   });

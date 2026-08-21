@@ -1,7 +1,7 @@
 import type { Connection, TableMeta } from "@dbchat/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, ChevronRight, Database, ExternalLink, MessageSquarePlus, RefreshCw, TerminalSquare } from "lucide-react";
+import { ChevronDown, ChevronRight, Database, ExternalLink, RefreshCw, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 
 import { SchemaTree, useSchemaRefresh } from "@/components/schema/schema-tree";
@@ -9,14 +9,6 @@ import { DialectIcon, EnvBadge } from "@/components/shared/primitives";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { tabIds, tabPath, type Tab, useApp } from "@/lib/store";
@@ -46,22 +38,32 @@ function DatabaseSection({
   connection,
   filter,
   initiallyOpen,
+  onOpenTable,
+  onOpenSql,
 }: {
   connection: Connection;
   filter: string;
   initiallyOpen: boolean;
+  onOpenTable?: (connection: Connection, table: TableMeta) => void;
+  onOpenSql?: (connection: Connection) => void;
 }) {
   const [open, setOpen] = useState(initiallyOpen);
   const { browse, openDatabaseTab } = useDatabaseNavigation();
   const { refresh, isRefreshing } = useSchemaRefresh(connection.id);
   const searchActive = filter.trim().length > 0;
   const expanded = open || searchActive;
-  const openTable = (table: TableMeta) => openDatabaseTab(connection.id, {
-    id: tabIds.table(table.schema, table.name),
-    kind: "table",
-    schema: table.schema,
-    table: table.name,
-  });
+  const openTable = (table: TableMeta) => {
+    if (onOpenTable) {
+      onOpenTable(connection, table);
+      return;
+    }
+    openDatabaseTab(connection.id, {
+      id: tabIds.table(table.schema, table.name),
+      kind: "table",
+      schema: table.schema,
+      table: table.name,
+    });
+  };
 
   return (
     <Collapsible open={expanded} onOpenChange={setOpen} className="rounded-md border border-line bg-canvas">
@@ -79,17 +81,19 @@ function DatabaseSection({
           <TooltipContent>Refresh schema</TooltipContent>
         </Tooltip>
         <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`New SQL query for ${connection.name}`} onClick={() => openDatabaseTab(connection.id, draftQuery())} />}>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`New SQL query for ${connection.name}`} onClick={() => onOpenSql ? onOpenSql(connection) : openDatabaseTab(connection.id, draftQuery())} />}>
             <TerminalSquare />
           </TooltipTrigger>
           <TooltipContent>New SQL query</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`Open ${connection.name} workspace`} onClick={() => browse(connection.id)} />}>
-            <ExternalLink />
-          </TooltipTrigger>
-          <TooltipContent>Open database workspace</TooltipContent>
-        </Tooltip>
+        {!onOpenTable ? (
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`Open ${connection.name} workspace`} onClick={() => browse(connection.id)} />}>
+              <ExternalLink />
+            </TooltipTrigger>
+            <TooltipContent>Open database workspace</TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
       <CollapsibleContent className="border-t border-line px-1 py-1">
         <SchemaTree connectionId={connection.id} filter={filter} onOpenTable={openTable} />
@@ -98,7 +102,15 @@ function DatabaseSection({
   );
 }
 
-export function HomeDataBrowser({ filter }: { filter: string }) {
+export function HomeDataBrowser({
+  filter,
+  onOpenTable,
+  onOpenSql,
+}: {
+  filter: string;
+  onOpenTable?: (connection: Connection, table: TableMeta) => void;
+  onOpenSql?: (connection: Connection) => void;
+}) {
   const { data: connections = [] } = useQuery(connectionListQuery);
 
   if (connections.length === 0) {
@@ -122,49 +134,15 @@ export function HomeDataBrowser({ filter }: { filter: string }) {
         <span className="ml-auto text-[10px] font-normal text-muted-foreground">expand multiple</span>
       </div>
       {connections.map((connection, index) => (
-        <DatabaseSection key={connection.id} connection={connection} filter={filter} initiallyOpen={index === 0} />
+        <DatabaseSection
+          key={connection.id}
+          connection={connection}
+          filter={filter}
+          initiallyOpen={index === 0}
+          onOpenTable={onOpenTable}
+          onOpenSql={onOpenSql}
+        />
       ))}
-    </div>
-  );
-}
-
-export function HomeTabActions({
-  onNewChat,
-  onBrowseDatabases,
-  databasesActive,
-}: {
-  onNewChat: () => void;
-  onBrowseDatabases: () => void;
-  databasesActive: boolean;
-}) {
-  const { data: connections = [] } = useQuery(connectionListQuery);
-  const { openDatabaseTab } = useDatabaseNavigation();
-
-  return (
-    <div className="mb-1 flex items-center gap-0.5">
-      <Button variant="ghost" size="xs" onClick={onNewChat} aria-label="New chat tab">
-        <MessageSquarePlus data-icon="inline-start" /> Chat
-      </Button>
-      <Button variant={databasesActive ? "secondary" : "ghost"} size="xs" onClick={onBrowseDatabases}>
-        <Database data-icon="inline-start" /> Databases ({connections.length})
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" size="xs" disabled={connections.length === 0} aria-label="New SQL editor" />}>
-          <TerminalSquare data-icon="inline-start" /> SQL <ChevronDown data-icon="inline-end" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Run SQL against</DropdownMenuLabel>
-            {connections.map((connection) => (
-              <DropdownMenuItem key={connection.id} onClick={() => openDatabaseTab(connection.id, draftQuery())}>
-                <DialectIcon dialect={connection.dialect} />
-                <span className="min-w-0 flex-1 truncate">{connection.name}</span>
-                <EnvBadge env={connection.env} />
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
   );
 }

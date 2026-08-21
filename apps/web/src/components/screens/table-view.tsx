@@ -24,7 +24,7 @@ import { useSettings } from "@/lib/settings";
 import { tabIds, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { tableRowsQuery } from "@/rpc/table";
-import { rpcErrorMessage, rpcErrorTag, schemaTableQuery } from "@/rpc/queries";
+import { connectionListQuery, rpcErrorMessage, rpcErrorTag, schemaTableQuery } from "@/rpc/queries";
 
 const NO_COLUMNS: ReadonlyArray<ColumnMeta> = [];
 
@@ -255,9 +255,23 @@ function ErrorBanner({ error, onRetry }: { error: unknown; onRetry?: () => void 
 
 /* ---------------- Screen ---------------- */
 
-export function TableView({ schema, table }: { schema: string; table: string }) {
-  const connection = useApp((s) => s.connection);
-  const connectionId = (connection?.id ?? "") as ConnectionId;
+export function TableView({
+  schema,
+  table,
+  connectionId: connectionIdProp,
+  onAskAboutTable,
+}: {
+  schema: string;
+  table: string;
+  connectionId?: string;
+  onAskAboutTable?: (context: string) => void;
+}) {
+  const workspaceConnection = useApp((s) => s.connection);
+  const { data: connections = [] } = useQuery(connectionListQuery);
+  const connectionId = (connectionIdProp ?? workspaceConnection?.id ?? "") as ConnectionId;
+  const connection = workspaceConnection?.id === connectionId
+    ? workspaceConnection
+    : connections.find((candidate) => candidate.id === connectionId);
   const dialect: Dialect = connection?.dialect ?? "postgres";
   const queryClient = useQueryClient();
   const openTab = useOpenTab();
@@ -334,11 +348,17 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
     );
   };
 
-  const askAboutTable = () =>
+  const askAboutTable = () => {
+    const context = `${schema}.${table}`;
+    if (onAskAboutTable) {
+      onAskAboutTable(context);
+      return;
+    }
     openTab(
       { id: tabIds.chat("home"), kind: "chat", threadId: "home", title: `Ask about ${table}` },
-      { context: `${schema}.${table}` },
+      { context },
     );
+  };
 
   const from = total === 0 ? 0 : offset + 1;
   const to = offset + (page?.rows.length ?? 0);

@@ -30,7 +30,7 @@ import { useConnectionId } from "@/lib/nav";
 import { type RowLimit, useSettings } from "@/lib/settings";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { schemaListQuery } from "@/rpc/queries";
+import { connectionListQuery, schemaListQuery } from "@/rpc/queries";
 import {
   cancelSql,
   explainSql,
@@ -78,21 +78,41 @@ function referencedTables(sql: string): Array<{ schema: string; table: string }>
   return [...out.values()];
 }
 
-export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
-  const connectionId = useConnectionId();
+interface SqlEditorProps {
+  queryId?: string;
+  connectionId?: string;
+  initialSql?: string;
+  onOpenChat?: (sql: string) => void;
+  onOpenQuery?: (queryId: string, title: string) => void;
+}
+
+export function SqlEditor({
+  queryId: queryIdProp,
+  connectionId: connectionIdProp,
+  initialSql,
+  onOpenChat,
+  onOpenQuery,
+}: SqlEditorProps = {}) {
+  const routeConnectionId = useConnectionId();
+  const connectionId = connectionIdProp ?? routeConnectionId;
   const params = useParams({ strict: false }) as { queryId?: string };
   const queryId = queryIdProp ?? params.queryId ?? "new";
   const search = useSearch({ strict: false }) as { sql?: string };
+  const prefilledSql = initialSql ?? (connectionIdProp ? undefined : search.sql);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const dark = useApp((s) => s.dark);
-  const connection = useApp((s) => s.connection);
+  const workspaceConnection = useApp((s) => s.connection);
+  const { data: connections = [] } = useQuery(connectionListQuery);
+  const connection = workspaceConnection?.id === connectionId
+    ? workspaceConnection
+    : connections.find((candidate) => candidate.id === connectionId);
   const setSqlDraft = useApp((s) => s.setSqlDraft);
   const clearSqlDraft = useApp((s) => s.clearSqlDraft);
   const currentThread = useChat((s) => s.currentThread[connectionId]);
 
   const [initialDraft] = useState(() => useApp.getState().getSqlDraft(connectionId, queryId));
-  const [code, setCode] = useState(() => search.sql ?? initialDraft ?? "");
+  const [code, setCode] = useState(() => prefilledSql ?? initialDraft ?? "");
   const [runId, setRunId] = useState<string | null>(null);
   const [result, setResult] = useState<SqlResult | null>(null);
   const [error, setError] = useState<RpcErrorInfo | null>(null);
@@ -116,15 +136,15 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
 
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const suggestGen = useRef(0);
-  const loadedFor = useRef<string | null>(search.sql ? "prefill" : initialDraft !== undefined ? "draft" : null);
+  const loadedFor = useRef<string | null>(prefilledSql ? "prefill" : initialDraft !== undefined ? "draft" : null);
 
   /* Explicit editor prefills win over a prior draft and become the new draft. */
   useEffect(() => {
-    if (!search.sql) return;
+    if (!prefilledSql) return;
     loadedFor.current = "prefill";
-    setCode(search.sql);
-    setSqlDraft(connectionId, queryId, search.sql);
-  }, [connectionId, queryId, search.sql, setSqlDraft]);
+    setCode(prefilledSql);
+    setSqlDraft(connectionId, queryId, prefilledSql);
+  }, [connectionId, queryId, prefilledSql, setSqlDraft]);
 
   /* ---------- saved query loading ---------- */
   const { data: savedList } = useQuery(savedQueriesQuery(connectionId));
@@ -243,6 +263,10 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
 
   const optimise = () => {
     const { text } = currentStatement();
+    if (onOpenChat) {
+      onOpenChat(text || code);
+      return;
+    }
     void navigate({
       to: "/c/$connectionId/chat/$threadId",
       params: { connectionId, threadId: currentThread ?? "home" },
@@ -259,7 +283,8 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
       clearSqlDraft(connectionId, queryId);
       setSaveOpen(false);
       loadedFor.current = q.id;
-      void navigate({ to: "/c/$connectionId/sql/$queryId", params: { connectionId, queryId: q.id }, search: {} });
+      if (onOpenQuery) onOpenQuery(q.id, `${q.name}.sql`);
+      else void navigate({ to: "/c/$connectionId/sql/$queryId", params: { connectionId, queryId: q.id }, search: {} });
     } catch (e) {
       setSaveError(describeRpcError(e).message);
     } finally {
@@ -398,13 +423,14 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
               {savedList?.map((s) => (
                 <DropdownMenuItem
                   key={s.id}
-                  onClick={() =>
-                    void navigate({
+                  onClick={() => {
+                    if (onOpenQuery) onOpenQuery(s.id, `${s.name}.sql`);
+                    else void navigate({
                       to: "/c/$connectionId/sql/$queryId",
                       params: { connectionId, queryId: s.id },
                       search: {},
-                    })
-                  }
+                    });
+                  }}
                 >
                   {s.name}
                 </DropdownMenuItem>

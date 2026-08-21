@@ -30,11 +30,13 @@ export function ThreadList({ showNewChat = true }: { showNewChat?: boolean }) {
   const streamingThreads = useChat((state) => state.threads);
   const resetThread = useChat((state) => state.reset);
   const setCurrentThread = useChat((state) => state.setCurrentThread);
+  const removeDataWorkspace = useApp((state) => state.removeDataWorkspace);
 
   const remove = useMutation({
     mutationFn: (threadId: string) => deleteThread(threadId),
     onSuccess: (_result, threadId) => {
       resetThread(threadId);
+      removeDataWorkspace(threadId);
       void queryClient.invalidateQueries({ queryKey: threadListKey });
     },
   });

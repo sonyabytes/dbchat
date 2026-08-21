@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { isDraftThread, useChat } from "@/lib/chat-store";
 import { useSettings } from "@/lib/settings";
 import { useSources } from "@/lib/source-store";
+import { dataTabIds, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { modelLabel, modelsQuery, resolveSelectedModel } from "@/rpc/ai";
 import { createThread, threadListKey, threadListQuery } from "@/rpc/chat";
@@ -20,7 +21,7 @@ import { connectionListQuery, schemaListQuery } from "@/rpc/queries";
 const EMPTY_SOURCES: ReadonlyArray<SourceRef> = [];
 
 export function ChatView({ compact = false, threadId: threadIdProp }: { compact?: boolean; threadId?: string }) {
-  const params = useParams({ strict: false }) as { threadId?: string; schema?: string; table?: string };
+  const params = useParams({ strict: false }) as { connectionId?: string; threadId?: string; schema?: string; table?: string };
   const search = useSearch({ strict: false }) as { context?: string; sql?: string };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -85,6 +86,18 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
 
   const openInEditor = (sql: string) => {
     if (!primaryConnectionId) return;
+    if (!params.connectionId) {
+      const queryId = `draft-${Date.now().toString(36)}`;
+      useApp.getState().openDataTab(threadId, {
+        id: dataTabIds.sql(primaryConnectionId, queryId),
+        kind: "sql",
+        connectionId: primaryConnectionId,
+        queryId,
+        title: "untitled.sql",
+        initialSql: sql,
+      });
+      return;
+    }
     void navigate({ to: "/c/$connectionId/sql/$queryId", params: { connectionId: primaryConnectionId, queryId: "new" }, search: { sql } });
   };
 
@@ -98,6 +111,7 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
     try {
       const thread = await createThread(text.slice(0, 60), selectedSources);
       void queryClient.invalidateQueries({ queryKey: threadListKey });
+      useApp.getState().moveDataWorkspace(threadId, thread.id);
       setCurrentThread("global", thread.id);
       if (selectedModel) setModel(thread.id, selectedModel.id);
       send(thread.id, text, context, selectedModel?.id);
