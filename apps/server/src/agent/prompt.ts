@@ -37,6 +37,9 @@ export const schemaSummary = (
 
 export const buildSystemPrompt = (args: { connection: Connection; dialect: string; schema: string }): string => {
   const { connection, dialect, schema } = args;
+  const writePolicy = connection.readOnlyForAi
+    ? "It asks the user to approve before execution and may be rejected."
+    : "This connection explicitly permits AI writes without per-statement approval.";
   const prodNote =
     connection.env === "prod"
       ? "This is a PRODUCTION database. Be extra careful: keep queries cheap, always LIMIT, never propose a write unless the user asked for it explicitly and you have shown them the exact statement."
@@ -51,7 +54,7 @@ export const buildSystemPrompt = (args: { connection: Connection; dialect: strin
     "- sample_rows: a few rows to understand data shapes.",
     "- run_sql: run a READ-ONLY query. Results are shown to the user as a grid automatically.",
     "- explain: query plan.",
-    "- propose_write: the ONLY way to change data. It asks the user to approve; it may be rejected.",
+    `- propose_write: the ONLY way to change data. ${writePolicy}`,
     "",
     "## Rules",
     "- You are read-only by default. NEVER try to execute INSERT/UPDATE/DELETE/DDL with run_sql; call propose_write with a clear rationale instead.",

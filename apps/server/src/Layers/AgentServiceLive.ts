@@ -15,6 +15,7 @@ import { buildCatalog, resolveModel } from "../agent/models.ts";
 import { type ChatRepoShape, makeChatRepo, newId } from "../agent/repo.ts";
 import { type ActiveTurn, loadSchemaSummary, type PendingApproval, runTurn } from "../agent/session.ts";
 import { buildSuggestPrompt, runSuggest } from "../agent/suggest.ts";
+import { forceReadOnlyDriver, makeAiWriteExecutor } from "../agent/writeGate.ts";
 import { ServerConfig } from "../config.ts";
 import { AgentService } from "../Services/AgentService.ts";
 import { ConnectionStore } from "../Services/ConnectionStore.ts";
@@ -44,10 +45,23 @@ export const AgentServiceLive = Layer.effect(
     const pendingApprovals = new Map<ApprovalId, PendingApproval>();
     const log = (msg: string, data?: Record<string, unknown>) => Effect.logInfo(msg, data ?? {});
 
+    const executeWrite = makeAiWriteExecutor({
+      getThread: repo.getThread,
+      getApproval: repo.getApproval,
+      getConnection: store.get,
+      acquireDriver: registry.acquire,
+    });
+
     const deps = (threadId: ThreadId, connectionId: Parameters<typeof registry.acquire>[0], model: string) => ({
       repo,
       hub,
-      acquireDriver: registry.acquire(connectionId) as Effect.Effect<Driver, unknown>,
+      acquireDriver: registry.acquire(connectionId).pipe(Effect.map(forceReadOnlyDriver)) as Effect.Effect<Driver, unknown>,
+      // Fail closed if the connection policy cannot be loaded.
+      writeApprovalRequired: store.get(connectionId).pipe(
+        Effect.map((connection) => connection.readOnlyForAi),
+        Effect.catch(() => Effect.succeed(true)),
+      ),
+      executeWrite,
       pendingApprovals,
       model,
       cwd,
