@@ -3,7 +3,7 @@
  * assistant Message parts for persistence. Pure & synchronous: feed messages in,
  * get events out. One instance per turn.
  */
-import type { ApprovalId, ChatEvent, MessagePart, MessageId, ToolCallId, Usage } from "@dbchat/contracts";
+import type { ApprovalId, ChatEvent, MessagePart, MessageId, SourceRef, ToolCallId, Usage } from "@dbchat/contracts";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 export const MCP_SERVER_NAME = "dbchat";
@@ -24,7 +24,7 @@ type MutablePart =
       durationMs?: number;
     }
   | Extract<MessagePart, { _tag: "ResultTable" }>
-  | { _tag: "Approval"; id: ApprovalId; sql: string; rowEstimate?: number; status: "pending" | "approved" | "rejected" | "executed" | "failed" };
+  | { _tag: "Approval"; id: ApprovalId; sql: string; rowEstimate?: number; status: "pending" | "approved" | "rejected" | "executed" | "failed"; source?: SourceRef };
 
 export interface TurnOutcome {
   readonly ok: boolean;
@@ -72,7 +72,7 @@ export class TurnNormalizer {
   ingestToolEvent(event: ChatEvent): void {
     switch (event._tag) {
       case "ResultTable":
-        this.parts.push({ _tag: "ResultTable", columns: event.columns, rows: event.rows, sql: event.sql });
+        this.parts.push({ _tag: "ResultTable", columns: event.columns, rows: event.rows, sql: event.sql, ...(event.source ? { source: event.source } : {}) });
         return;
       case "ApprovalRequested":
         this.parts.push({
@@ -80,6 +80,7 @@ export class TurnNormalizer {
           id: event.approvalId,
           sql: event.sql,
           ...(event.rowEstimate !== undefined ? { rowEstimate: event.rowEstimate } : {}),
+          ...(event.source ? { source: event.source } : {}),
           status: "pending",
         });
         return;

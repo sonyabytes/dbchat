@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useApp } from "@/lib/store";
 import { connectionApi, connectionKeys } from "@/rpc/connections";
 import { rpcErrorMessage } from "@/rpc/queries";
+import { threadListKey } from "@/rpc/chat";
 
 export function DeleteConnectionDialog({
   connection, open, onOpenChange,
@@ -28,6 +29,7 @@ export function DeleteConnectionDialog({
       await connectionApi.remove(connection.id);
       useApp.getState().removeConnectionWorkspace(connection.id);
       await queryClient.invalidateQueries({ queryKey: connectionKeys.list });
+      await queryClient.invalidateQueries({ queryKey: threadListKey });
       queryClient.removeQueries({ queryKey: connectionKeys.connect(connection.id) });
       onOpenChange(false);
     } catch (e) {
@@ -43,8 +45,8 @@ export function DeleteConnectionDialog({
         <DialogHeader>
           <DialogTitle>Delete “{connection?.name}”?</DialogTitle>
           <DialogDescription>
-            This permanently removes the stored credentials, saved queries, query history, and chats for this
-            connection from dbchat. The database itself is untouched.
+            This permanently removes the stored credentials, saved queries, and query history from dbchat.
+            Existing conversations are preserved with this source detached. The database itself is untouched.
           </DialogDescription>
         </DialogHeader>
         {error && <div className="rounded-md bg-danger-tint px-3 py-2 text-xs text-danger">{error}</div>}

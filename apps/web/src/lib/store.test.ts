@@ -21,7 +21,7 @@ describe("tabIds / tabPath", () => {
   test("paths are url-encoded", () => {
     expect(tabPath("c 1", table("public", "my table"))).toBe("/c/c%201/t/public/my%20table");
     expect(tabPath("c1", sql("q/1"))).toBe("/c/c1/sql/q%2F1");
-    expect(tabPath("c1", chat("t1"))).toBe("/c/c1/chat/t1");
+    expect(tabPath("c1", chat("t1"))).toBe("/chat/t1");
   });
 });
 

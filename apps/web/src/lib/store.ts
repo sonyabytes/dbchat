@@ -14,12 +14,14 @@ export const tabIds = {
   chat: (threadId: string) => `chat:${threadId}`,
 };
 
+export const GLOBAL_WORKSPACE_ID = "global";
+
 /** Route path for a tab inside a connection workspace. */
 export function tabPath(connectionId: string, t: Tab): string {
+  if (t.kind === "chat") return `/chat/${encodeURIComponent(t.threadId)}`;
   const base = `/c/${encodeURIComponent(connectionId)}`;
   if (t.kind === "table") return `${base}/t/${encodeURIComponent(t.schema)}/${encodeURIComponent(t.table)}`;
-  if (t.kind === "sql") return `${base}/sql/${encodeURIComponent(t.queryId)}`;
-  return `${base}/chat/${encodeURIComponent(t.threadId)}`;
+  return `${base}/sql/${encodeURIComponent(t.queryId)}`;
 }
 
 interface ConnectionWorkspace {
@@ -43,6 +45,7 @@ interface AppState {
   rightPanel: "chat" | "schema" | null;
   dark: boolean;
   setConnection: (c: Connection | null) => void;
+  setGlobalWorkspace: () => void;
   /** Add (if missing) and activate. Does NOT navigate — use `useOpenTab` from lib/nav. */
   openTab: (t: Tab, connectionId: string) => void;
   /** Rename a sql/chat tab in place (thread titles arrive after the first message). */
@@ -70,7 +73,7 @@ export const useApp = create<AppState>()(
       activeTab: null,
       workspaces: {},
       sqlDrafts: {},
-      rightPanel: "chat",
+      rightPanel: null,
       dark: document.documentElement.classList.contains("dark"),
       setConnection: (c) => {
         if (!c) {
@@ -83,6 +86,17 @@ export const useApp = create<AppState>()(
           tabsConnectionId: c.id,
           tabs: workspace.tabs,
           activeTab: workspace.activeTab,
+        });
+      },
+      setGlobalWorkspace: () => {
+        const workspace = get().workspaces[GLOBAL_WORKSPACE_ID] ?? emptyWorkspace();
+        set({
+          connection: null,
+          tabsConnectionId: GLOBAL_WORKSPACE_ID,
+          tabs: workspace.tabs.filter((tab) => tab.kind === "chat"),
+          activeTab: workspace.tabs.some((tab) => tab.id === workspace.activeTab && tab.kind === "chat")
+            ? workspace.activeTab
+            : workspace.tabs.find((tab) => tab.kind === "chat")?.id ?? null,
         });
       },
       openTab: (t, connectionId) => {

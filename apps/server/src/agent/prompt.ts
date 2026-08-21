@@ -1,5 +1,5 @@
 /** System prompt + compact schema summary for the agent. */
-import type { ChatContext, Connection, SchemaMeta, TableDetail } from "@dbchat/contracts";
+import type { ChatContext, Connection, GitRepository, SchemaMeta, TableDetail } from "@dbchat/contracts";
 
 export const SCHEMA_SUMMARY_MAX_CHARS = 6_000;
 
@@ -35,38 +35,50 @@ export const schemaSummary = (
   return out.trimEnd();
 };
 
-export const buildSystemPrompt = (args: { connection: Connection; dialect: string; schema: string }): string => {
-  const { connection, dialect, schema } = args;
-  const writePolicy = connection.readOnlyForAi
-    ? "It asks the user to approve before execution and may be rejected."
-    : "This connection explicitly permits AI writes without per-statement approval.";
-  const prodNote =
-    connection.env === "prod"
-      ? "This is a PRODUCTION database. Be extra careful: keep queries cheap, always LIMIT, never propose a write unless the user asked for it explicitly and you have shown them the exact statement."
-      : `Environment: ${connection.env}.`;
+export const buildSystemPrompt = (args: {
+  databases: ReadonlyArray<{ connection: Connection; dialect: string; schema: string }>;
+  repositories: ReadonlyArray<GitRepository>;
+}): string => {
+  const { databases, repositories } = args;
+  const databaseSummary = databases.length === 0
+    ? "(No database is attached. You can still answer general questions and use Git context.)"
+    : databases.map(({ connection, dialect, schema }) => {
+        const prod = connection.env === "prod" ? " PRODUCTION: use cheap, limited reads and never write unless explicitly requested." : "";
+        return [
+          `### ${connection.name} (sourceId: ${connection.id})`,
+          `${dialect}; database: ${connection.database || "default"}; environment: ${connection.env}.${prod}`,
+          schema || "(schema unavailable; use list_schemas)",
+        ].join("\n");
+      }).join("\n\n");
+  const repositorySummary = repositories.length === 0
+    ? "(No Git repository is attached.)"
+    : repositories.map((repository) =>
+        `- ${repository.name} (repositoryId: ${repository.id}), ${repository.branch} @ ${repository.headCommit}`,
+      ).join("\n");
   return [
-    `You are dbchat, an expert ${dialect} assistant embedded in a database GUI.`,
-    `Connection: "${connection.name}" (${dialect}, database "${connection.database || "default"}"). ${prodNote}`,
+    "You are dbchat, an expert data assistant embedded in a database and analytics GUI.",
     "",
     "## Tools",
-    "- list_schemas: schemas and tables with row estimates.",
-    "- describe_table: columns, keys, indexes for one table. Use it before writing non-trivial queries.",
-    "- sample_rows: a few rows to understand data shapes.",
-    "- run_sql: run a READ-ONLY query. Results are shown to the user as a grid automatically.",
-    "- explain: query plan.",
-    `- propose_write: the ONLY way to change data. ${writePolicy}`,
+    "- list_sources gives the ids and current revisions of every attached source.",
+    "- Database tools accept sourceId. It is mandatory when several databases are attached.",
+    "- Git tools accept repositoryId and read only the pinned commit shown below.",
+    "- propose_write is the ONLY way to change data and is checked against the selected connection's policy.",
     "",
     "## Rules",
     "- You are read-only by default. NEVER try to execute INSERT/UPDATE/DELETE/DDL with run_sql; call propose_write with a clear rationale instead.",
+    "- Never imply that separate databases support a federated join. Query each explicitly, then compare the returned results in your reasoning.",
+    "- State which source supplied important facts. For Git context, cite repository, file path, and commit.",
     "- Prefer LIMIT (≤ 100 unless asked) and selective columns. Avoid SELECT * on big tables.",
-    "- Use the exact identifier quoting for " + dialect + ".",
     "- Do not guess column names: if unsure, describe_table first.",
     "- Respond in concise markdown. Keep explanations brief.",
     "- After running a query, summarise the results in 1–3 sentences; do not repeat the full table in text (the user already sees the grid). Show the SQL in a fenced ```sql block.",
     "- If a query fails, fix it and retry at most twice, then explain.",
     "",
-    "## Schema summary (use describe_table for details)",
-    schema || "(no tables found)",
+    "## Attached databases and schema summaries",
+    databaseSummary,
+    "",
+    "## Attached Git repositories",
+    repositorySummary,
   ].join("\n");
 };
 

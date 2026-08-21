@@ -1,50 +1,52 @@
-import type { ApprovalId, ChatContext, ConnectionId } from "@dbchat/contracts";
-import { Loader } from "@/components/shared/primitives";
+import type { ApprovalId, ChatContext, ConnectionId, SourceRef } from "@dbchat/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChatMessage } from "@/components/chat/message";
 import { PromptBar } from "@/components/shared/prompt-bar";
-import { ErrorBanner } from "@/components/shared/primitives";
+import { ErrorBanner, Loader } from "@/components/shared/primitives";
+import { SourcePicker } from "@/components/sources/source-picker";
+import { Badge } from "@/components/ui/badge";
 import { isDraftThread, useChat } from "@/lib/chat-store";
-import { useConnectionId } from "@/lib/nav";
 import { useSettings } from "@/lib/settings";
-import { useApp } from "@/lib/store";
+import { useSources } from "@/lib/source-store";
 import { cn } from "@/lib/utils";
 import { modelLabel, modelsQuery, resolveSelectedModel } from "@/rpc/ai";
 import { createThread, threadListKey, threadListQuery } from "@/rpc/chat";
-import { schemaListQuery } from "@/rpc/queries";
+import { gitRepositoryListQuery } from "@/rpc/git";
+import { connectionListQuery, schemaListQuery } from "@/rpc/queries";
 
-/**
- * Chat surface. Rendered full-width by the thread route and `compact` in the
- * workspace side panel — both read the same per-thread store, so a turn started
- * in one shows up live in the other with a single subscription.
- */
+const EMPTY_SOURCES: ReadonlyArray<SourceRef> = [];
+
 export function ChatView({ compact = false, threadId: threadIdProp }: { compact?: boolean; threadId?: string }) {
-  const connectionId = useConnectionId();
-  const connection = useApp((s) => s.connection);
   const params = useParams({ strict: false }) as { threadId?: string; schema?: string; table?: string };
   const search = useSearch({ strict: false }) as { context?: string; sql?: string };
   const navigate = useNavigate();
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
 
-  const currentThread = useChat((s) => s.currentThread[connectionId]);
+  const currentThread = useChat((state) => state.currentThread.global);
   const threadId = threadIdProp ?? params.threadId ?? currentThread ?? "home";
   const draft = isDraftThread(threadId);
-
-  const thread = useChat((s) => s.threads[threadId]);
-  const messages = thread?.messages ?? [];
-  const streaming = thread?.streaming ?? false;
-  const error = thread?.error;
-
-  const { attach, detach, load, send, retry, abort, clearError, resolveApproval, setCurrentThread, setModel } =
-    useChat.getState();
+  const chat = useChat((state) => state.threads[threadId]);
+  const messages = chat?.messages ?? [];
+  const streaming = chat?.streaming ?? false;
+  const error = chat?.error;
+  const { attach, detach, load, send, retry, abort, clearError, resolveApproval, setCurrentThread, setModel } = useChat.getState();
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [contextOff, setContextOff] = useState(false);
 
-  /* one subscription per thread, refcounted across the tab + the side panel */
+  const { data: threads = [] } = useQuery(threadListQuery);
+  const { data: connections = [] } = useQuery(connectionListQuery);
+  const { data: repositories = [] } = useQuery(gitRepositoryListQuery);
+  const draftSources = useSources((state) => state.draftSources);
+  const persistedThread = threads.find((thread) => thread.id === threadId);
+  const selectedSources = draft ? draftSources : (persistedThread?.sources ?? EMPTY_SOURCES);
+  const databaseSources = selectedSources.filter((source) => source.kind === "database");
+  const primaryConnectionId = databaseSources[0]?.id;
+  const primaryConnection = connections.find((connection) => connection.id === primaryConnectionId);
+
   useEffect(() => {
     if (!threadId || draft) return;
     attach(threadId);
@@ -53,86 +55,63 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
   }, [threadId, draft, attach, detach, load]);
 
   useEffect(() => {
-    if (connectionId && threadId && !draft) setCurrentThread(connectionId, threadId);
-  }, [connectionId, threadId, draft, setCurrentThread]);
+    if (!draft) setCurrentThread("global", threadId);
+  }, [threadId, draft, setCurrentThread]);
 
-  /* @mentions from the live schema */
-  const { data: schemas } = useQuery({ ...schemaListQuery(connectionId as ConnectionId), enabled: Boolean(connectionId) });
-  const tables = useMemo(
-    () =>
-      (schemas ?? []).flatMap((s) =>
-        s.tables.map((t) => ({
-          schema: s.name,
-          name: t.name,
-          detail: t.rowEstimate ? `${Intl.NumberFormat("en", { notation: "compact" }).format(t.rowEstimate)} rows` : "",
-        })),
-      ),
-    [schemas],
-  );
+  const { data: schemas } = useQuery({
+    ...schemaListQuery((primaryConnectionId ?? "unattached") as ConnectionId),
+    enabled: Boolean(primaryConnectionId),
+  });
+  const tables = useMemo(() => (schemas ?? []).flatMap((schema) => schema.tables.map((table) => ({
+    schema: schema.name,
+    name: table.name,
+    detail: table.rowEstimate ? `${Intl.NumberFormat("en", { notation: "compact" }).format(table.rowEstimate)} rows` : "",
+  }))), [schemas]);
 
-  /* model: this session's pick → the thread's last model → user default → server default */
   const { data: catalog } = useQuery(modelsQuery);
-  const { data: threads } = useQuery({ ...threadListQuery(connectionId), enabled: Boolean(connectionId) && !draft });
-  const persistedModel = threads?.find((t) => t.id === threadId)?.model;
-  const sessionModel = useChat((s) => s.threads[threadId]?.model);
-  const defaultModel = useSettings((s) => s.defaultModel);
+  const persistedModel = persistedThread?.model;
+  const sessionModel = useChat((state) => state.threads[threadId]?.model);
+  const defaultModel = useSettings((state) => state.defaultModel);
   const selectedModel = resolveSelectedModel(catalog, [sessionModel, persistedModel, defaultModel]);
-  /** Label for the model that produced a turn, falling back to the current selection. */
   const turnModelLabel = (id: string | undefined) => modelLabel(catalog, id) ?? selectedModel?.label;
 
-  /* context: ?context=schema.table / ?sql=… , or the table the side panel is sitting on */
-  const autoTableContext = useSettings((s) => s.autoTableContext);
-  const contextTable =
-    search.context ??
-    (autoTableContext && compact && params.schema && params.table ? `${params.schema}.${params.table}` : undefined);
+  const autoTableContext = useSettings((state) => state.autoTableContext);
+  const contextTable = search.context ?? (autoTableContext && compact && params.schema && params.table ? `${params.schema}.${params.table}` : undefined);
   const contextSql = search.sql;
   const contextLabel = contextOff ? null : (contextTable ?? (contextSql ? "editor query" : null));
-  const context: ChatContext | undefined = useMemo(
-    () =>
-      contextOff ? undefined : contextTable ? { table: contextTable } : contextSql ? { sql: contextSql } : undefined,
-    [contextOff, contextTable, contextSql],
-  );
+  const context: ChatContext | undefined = contextOff ? undefined : contextTable ? { table: contextTable } : contextSql ? { sql: contextSql } : undefined;
 
-  const openInEditor = useCallback(
-    (sql: string) => {
-      void navigate({ to: "/c/$connectionId/sql/$queryId", params: { connectionId, queryId: "new" }, search: { sql } });
-    },
-    [navigate, connectionId],
-  );
+  const openInEditor = (sql: string) => {
+    if (!primaryConnectionId) return;
+    void navigate({ to: "/c/$connectionId/sql/$queryId", params: { connectionId: primaryConnectionId, queryId: "new" }, search: { sql } });
+  };
 
-  const doSend = useCallback(
-    async (text: string) => {
-      setCreateError(null);
-      if (!draft) {
-        send(threadId, text, context, selectedModel?.id);
-        return;
-      }
-      setCreating(true);
-      try {
-        const t = await createThread(connectionId, text.slice(0, 60));
-        void qc.invalidateQueries({ queryKey: threadListKey(connectionId) });
-        setCurrentThread(connectionId, t.id);
-        // Carry the draft's pick onto the real thread so the picker does not blink back.
-        if (selectedModel) setModel(t.id, selectedModel.id);
-        send(t.id, text, context, selectedModel?.id);
-        if (!compact) {
-          void navigate({ to: "/c/$connectionId/chat/$threadId", params: { connectionId, threadId: t.id }, search: {} });
-        }
-      } catch {
-        setCreateError("Could not start a new chat on this connection.");
-      } finally {
-        setCreating(false);
-      }
-    },
-    [draft, threadId, context, send, connectionId, qc, setCurrentThread, setModel, compact, navigate, selectedModel],
-  );
+  const doSend = async (text: string) => {
+    setCreateError(null);
+    if (!draft) {
+      send(threadId, text, context, selectedModel?.id);
+      return;
+    }
+    setCreating(true);
+    try {
+      const thread = await createThread(text.slice(0, 60), selectedSources);
+      void queryClient.invalidateQueries({ queryKey: threadListKey });
+      setCurrentThread("global", thread.id);
+      if (selectedModel) setModel(thread.id, selectedModel.id);
+      send(thread.id, text, context, selectedModel?.id);
+      if (!compact) void navigate({ to: "/chat/$threadId", params: { threadId: thread.id }, search: {} });
+    } catch {
+      setCreateError("Could not start a new conversation.");
+    } finally {
+      setCreating(false);
+    }
+  };
 
-  /* stick to the bottom while a turn streams */
   const scroller = useRef<HTMLDivElement>(null);
   const lastPartCount = messages[messages.length - 1]?.parts.length ?? 0;
   useEffect(() => {
-    const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    const element = scroller.current;
+    if (element) element.scrollTop = element.scrollHeight;
   }, [messages.length, streaming, lastPartCount]);
 
   const promptProps = {
@@ -140,26 +119,51 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
     tables,
     streaming,
     onStop: () => abort(threadId),
-    onSend: (t: string) => void doSend(t),
+    onSend: (text: string) => void doSend(text),
     disabled: creating,
     context: contextLabel ? { label: contextLabel, onRemove: () => setContextOff(true) } : null,
     ...(selectedModel ? { model: selectedModel.id, modelLabel: selectedModel.label } : {}),
-    // Applies from the next send onwards; the server persists it on the thread.
     onModelChange: (id: string) => setModel(threadId, id),
   };
 
-  const empty = messages.length === 0;
+  const sourceLabels = selectedSources.map((source) => source.kind === "database"
+    ? connections.find((connection) => connection.id === source.id)?.name
+    : repositories.find((repository) => repository.id === source.id)?.name,
+  ).filter((label): label is string => Boolean(label));
+  const sourceInfo = (source: SourceRef | undefined) => {
+    if (!source) return undefined;
+    if (source.kind === "database") {
+      const connection = connections.find((candidate) => candidate.id === source.id);
+      return connection ? { name: connection.name, env: connection.env } : undefined;
+    }
+    const repository = repositories.find((candidate) => candidate.id === source.id);
+    return repository ? { name: `${repository.name} · ${repository.headCommit.slice(0, 8)}` } : undefined;
+  };
+  const sourceControls = (
+    <div className="mb-2 flex min-w-0 items-center gap-1.5">
+      <SourcePicker threadId={threadId} compact />
+      <div className="flex min-w-0 gap-1 overflow-hidden">
+        {sourceLabels.slice(0, 3).map((label) => <Badge key={label} variant="outline" className="truncate">{label}</Badge>)}
+        {sourceLabels.length > 3 ? <Badge variant="outline">+{sourceLabels.length - 3}</Badge> : null}
+      </div>
+    </div>
+  );
 
+  const empty = messages.length === 0;
   if (empty && draft) {
     return (
       <div className={cn("flex h-full flex-col items-center justify-center px-6", compact && "px-3")}>
         <h2 className={cn("text-center font-semibold tracking-tight", compact ? "text-base" : "text-xl")}>
-          What do you want to know about <span className="font-mono">{connection?.database ?? "your data"}</span>?
+          What do you want to explore?
         </h2>
+        <p className="mt-2 text-center text-sm text-ink-3">
+          Ask a general question, or attach databases and Git models for live context.
+        </p>
         <div className={cn("mt-6 w-full", compact ? "max-w-none" : "max-w-2xl")}>
+          {sourceControls}
           <PromptBar {...promptProps} autoFocus={!compact} />
         </div>
-        {createError && <div className="mt-3 w-full max-w-2xl"><ErrorBanner message={createError} /></div>}
+        {createError ? <div className="mt-3 w-full max-w-2xl"><ErrorBanner message={createError} /></div> : null}
       </div>
     );
   }
@@ -168,25 +172,18 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
     <div className="flex h-full min-h-0 flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
         <div className={cn("mx-auto flex w-full flex-col gap-5 px-4 py-5", compact ? "max-w-none" : "max-w-3xl")}>
-          {empty && (
-            <p className="py-8 text-center text-sm text-ink-3">
-              No messages yet — ask something about <span className="font-mono">{connection?.database ?? "this database"}</span>.
-            </p>
-          )}
-          {messages.map((m, i) => (
+          {empty ? <p className="py-8 text-center text-sm text-ink-3">No messages yet—ask about your connected sources or start without one.</p> : null}
+          {messages.map((message, index) => (
             <ChatMessage
-              key={m.id}
-              message={m}
-              streaming={streaming && i === messages.length - 1}
-              {...(connection?.name ? { connectionName: connection.name } : {})}
-              {...(connection?.env ? { env: connection.env } : {})}
-              onOpenSql={openInEditor}
-              {...(turnModelLabel(m.model) ? { modelLabel: turnModelLabel(m.model)! } : {})}
-              onRetry={
-                m.role === "assistant" && i === messages.length - 1
-                  ? () => retry(threadId, context, selectedModel?.id)
-                  : undefined
-              }
+              key={message.id}
+              message={message}
+              streaming={streaming && index === messages.length - 1}
+              sourceInfo={sourceInfo}
+              {...(primaryConnection?.name ? { connectionName: primaryConnection.name } : {})}
+              {...(primaryConnection?.env ? { env: primaryConnection.env } : {})}
+              {...(primaryConnectionId ? { onOpenSql: openInEditor } : {})}
+              {...(turnModelLabel(message.model) ? { modelLabel: turnModelLabel(message.model)! } : {})}
+              onRetry={message.role === "assistant" && index === messages.length - 1 ? () => retry(threadId, context, selectedModel?.id) : undefined}
               onApprove={(approvalId, approve) => void resolveApproval(threadId, approvalId as ApprovalId, approve)}
             />
           ))}
@@ -199,6 +196,7 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
         </div>
       </div>
       <div className={cn("shrink-0 px-4 pb-4 pt-2", !compact && "mx-auto w-full max-w-3xl")}>
+        {sourceControls}
         <PromptBar {...promptProps} />
       </div>
     </div>

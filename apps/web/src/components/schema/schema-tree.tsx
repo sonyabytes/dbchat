@@ -108,7 +108,15 @@ function ColumnList({ connectionId, table, highlight }: { connectionId: string; 
   );
 }
 
-export function SchemaTree({ connectionId, filter }: { connectionId: string; filter: string }) {
+export function SchemaTree({
+  connectionId,
+  filter,
+  onOpenTable,
+}: {
+  connectionId: string;
+  filter: string;
+  onOpenTable?: (table: TableMeta) => void;
+}) {
   const activeTab = useApp((s) => s.activeTab);
   const openTab = useOpenTab();
   const { data: schemas, isPending, error, refetch } = useQuery(schemaListQuery(connectionId as ConnectionId));
@@ -199,7 +207,9 @@ export function SchemaTree({ connectionId, filter }: { connectionId: string; fil
                     <button
                       type="button"
                       className="flex min-w-0 flex-1 items-center gap-1.5"
-                      onClick={() => openTab({ id, kind: "table", schema: t.schema, table: t.name })}
+                      onClick={() => onOpenTable
+                        ? onOpenTable(t)
+                        : openTab({ id, kind: "table", schema: t.schema, table: t.name })}
                     >
                       <Table2 className="size-3.5 shrink-0 text-ink-3" />
                       <span className="truncate">{t.name}</span>

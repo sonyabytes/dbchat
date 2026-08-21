@@ -30,7 +30,7 @@ const program = Effect.gen(function* () {
   const client = yield* RpcClient.make(DbchatRpcs);
   const thread = process.env.THREAD_ID
     ? { id: process.env.THREAD_ID as ThreadId }
-    : yield* client[RPC.chatThreadsCreate]({ connectionId });
+    : yield* client[RPC.chatThreadsCreate]({ sources: [{ kind: "database", id: connectionId }] });
   console.log("thread", thread.id);
   const t0 = Date.now();
   yield* client[RPC.chatSend]({ threadId: thread.id, text: prompt }).pipe(
@@ -58,7 +58,7 @@ const program = Effect.gen(function* () {
   );
   const msgs = yield* client[RPC.chatMessagesList]({ threadId: thread.id });
   console.log("persisted messages", msgs.map((m) => `${m.role}:${m.parts.map((p) => p._tag).join(",")}`));
-  const threads = yield* client[RPC.chatThreadsList]({ connectionId });
+  const threads = yield* client[RPC.chatThreadsList]();
   console.log("thread title", threads.find((t) => t.id === thread.id)?.title, "sdkSessionId", threads.find((t) => t.id === thread.id)?.sdkSessionId);
 }).pipe(Effect.scoped, Effect.provide(ProtocolLive));
 

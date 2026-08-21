@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import { aiHandlers } from "./ai.ts";
 import { chatHandlers } from "./chat.ts";
 import { connectionHandlers } from "./connection.ts";
+import { gitHandlers } from "./git.ts";
 import { schemaHandlers } from "./schema.ts";
 import { serverHandlers } from "./server.ts";
 import { sqlHandlers } from "./sql.ts";
@@ -19,6 +20,7 @@ export const RpcHandlersLive = DbchatRpcs.toLayer(
     return DbchatRpcs.of({
       ...(yield* serverHandlers),
       ...(yield* connectionHandlers),
+      ...(yield* gitHandlers),
       ...(yield* schemaHandlers),
       ...(yield* tableHandlers),
       ...(yield* sqlHandlers),

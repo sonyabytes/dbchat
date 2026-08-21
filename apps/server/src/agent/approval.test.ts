@@ -11,7 +11,7 @@ import type { ChatRepoShape } from "./repo.ts";
 import { type PendingApproval, proposeWrite, type SessionDeps } from "./session.ts";
 import { collectQuery } from "./tools.ts";
 
-const thread: Thread = { id: "t1" as ThreadId, connectionId: "c1" as never, title: "x", createdAt: "", updatedAt: "" };
+const thread: Thread = { id: "t1" as ThreadId, sources: [{ kind: "database", id: "c1" as never }], title: "x", createdAt: "", updatedAt: "" };
 const messageId = "m1" as MessageId;
 
 const makeMockDriver = (
@@ -48,8 +48,9 @@ const setup = (batch?: RowBatch, approvalRequired = true) =>
   const deps: SessionDeps = {
     repo: makeMockRepo(statuses),
     hub,
-    acquireDriver: Effect.succeed(batch === undefined ? makeMockDriver(calls) : makeMockDriver(calls, batch)),
-    writeApprovalRequired: Effect.succeed(approvalRequired),
+    databases: [],
+    repositories: [],
+    writeApprovalRequired: () => Effect.succeed(approvalRequired),
     executeWrite: ({ sql }) =>
       collectQuery(batch === undefined ? makeMockDriver(calls) : makeMockDriver(calls, batch), sql, {
         readOnly: false,
@@ -81,6 +82,7 @@ describe("propose_write approval flow", () => {
         const outcome = yield* proposeWrite({
           deps: s.deps,
           thread,
+          connectionId: "c1" as never,
           messageId,
           sql: "update t set a = 1",
           estimatedRows: 2,
@@ -102,7 +104,7 @@ describe("propose_write approval flow", () => {
       Effect.gen(function* () {
         const s = yield* setup();
         const fiber = yield* Effect.forkChild(
-          proposeWrite({ deps: s.deps, thread, messageId, sql: "update t set a = 1", estimatedRows: 3, emit: s.emit }),
+          proposeWrite({ deps: s.deps, thread, connectionId: "c1" as never, messageId, sql: "update t set a = 1", estimatedRows: 3, emit: s.emit }),
         );
         const { id, p } = yield* waitForPending(s.pendingApprovals);
         expect(s.events.map((e) => e._tag)).toEqual(["ApprovalRequested"]);
@@ -133,6 +135,7 @@ describe("propose_write approval flow", () => {
           proposeWrite({
             deps: s.deps,
             thread,
+            connectionId: "c1" as never,
             messageId,
             sql: "update t set a = 1",
             estimatedRows: undefined,
@@ -161,6 +164,7 @@ describe("propose_write approval flow", () => {
           proposeWrite({
             deps: s.deps,
             thread,
+            connectionId: "c1" as never,
             messageId,
             sql: "insert into t values (1), (2) returning id",
             estimatedRows: undefined,
@@ -180,7 +184,7 @@ describe("propose_write approval flow", () => {
       Effect.gen(function* () {
         const s = yield* setup();
         const fiber = yield* Effect.forkChild(
-          proposeWrite({ deps: s.deps, thread, messageId, sql: "delete from t", estimatedRows: undefined, emit: s.emit }),
+          proposeWrite({ deps: s.deps, thread, connectionId: "c1" as never, messageId, sql: "delete from t", estimatedRows: undefined, emit: s.emit }),
         );
         const { p } = yield* waitForPending(s.pendingApprovals);
         yield* Deferred.succeed(p.decision, false);

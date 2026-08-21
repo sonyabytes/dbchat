@@ -1,4 +1,4 @@
-import type { MessagePart } from "@dbchat/contracts";
+import type { MessagePart, SourceRef } from "@dbchat/contracts";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
@@ -112,6 +112,7 @@ export function ChatMessage({
   onOpenSql,
   onRetry,
   onApprove,
+  sourceInfo,
 }: {
   message: UiMessage;
   streaming: boolean;
@@ -122,6 +123,7 @@ export function ChatMessage({
   onOpenSql?: (sql: string) => void;
   onRetry?: () => void;
   onApprove?: (approvalId: string, approve: boolean) => void;
+  sourceInfo?: (source: SourceRef | undefined) => { name: string; env?: string } | undefined;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -200,21 +202,25 @@ export function ChatMessage({
                 </Suspense>
               </div>
             ) : null;
-          case "ResultTable":
+          case "ResultTable": {
+            const info = sourceInfo?.(p.source);
             return (
-              <ResultGrid key={i} columns={p.columns} rows={p.rows} sql={p.sql} {...(onOpenSql ? { onOpenInEditor: onOpenSql } : {})} />
+              <ResultGrid key={i} columns={p.columns} rows={p.rows} sql={p.sql} {...(info?.name ? { sourceName: info.name } : {})} {...(onOpenSql ? { onOpenInEditor: onOpenSql } : {})} />
             );
-          case "Approval":
+          }
+          case "Approval": {
+            const info = sourceInfo?.(p.source);
             return (
               <ApprovalCard
                 key={i}
                 part={p}
-                {...(connectionName ? { connectionName } : {})}
-                {...(env ? { env } : {})}
+                {...(info?.name || connectionName ? { connectionName: info?.name ?? connectionName! } : {})}
+                {...(info?.env || env ? { env: info?.env ?? env! } : {})}
                 {...(onOpenSql ? { onOpenInEditor: onOpenSql } : {})}
                 onDecide={(approve) => onApprove?.(p.id, approve)}
               />
             );
+          }
           default:
             return null;
         }

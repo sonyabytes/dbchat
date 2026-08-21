@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as CConnectionIdRouteImport } from './routes/c.$connectionId'
+import { Route as ChatThreadIdRouteImport } from './routes/chat.$threadId'
 import { Route as CConnectionIdIndexRouteImport } from './routes/c.$connectionId.index'
 import { Route as CConnectionIdChatThreadIdRouteImport } from './routes/c.$connectionId.chat.$threadId'
 import { Route as CConnectionIdSqlQueryIdRouteImport } from './routes/c.$connectionId.sql.$queryId'
@@ -30,6 +31,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const CConnectionIdRoute = CConnectionIdRouteImport.update({
   id: '/c/$connectionId',
   path: '/c/$connectionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
+  id: '/chat/$threadId',
+  path: '/chat/$threadId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CConnectionIdIndexRoute = CConnectionIdIndexRouteImport.update({
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/c/$connectionId': typeof CConnectionIdRouteWithChildren
+  '/chat/$threadId': typeof ChatThreadIdRoute
   '/c/$connectionId/': typeof CConnectionIdIndexRoute
   '/c/$connectionId/chat/$threadId': typeof CConnectionIdChatThreadIdRoute
   '/c/$connectionId/sql/$queryId': typeof CConnectionIdSqlQueryIdRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/chat/$threadId': typeof ChatThreadIdRoute
   '/c/$connectionId': typeof CConnectionIdIndexRoute
   '/c/$connectionId/chat/$threadId': typeof CConnectionIdChatThreadIdRoute
   '/c/$connectionId/sql/$queryId': typeof CConnectionIdSqlQueryIdRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/c/$connectionId': typeof CConnectionIdRouteWithChildren
+  '/chat/$threadId': typeof ChatThreadIdRoute
   '/c/$connectionId/': typeof CConnectionIdIndexRoute
   '/c/$connectionId/chat/$threadId': typeof CConnectionIdChatThreadIdRoute
   '/c/$connectionId/sql/$queryId': typeof CConnectionIdSqlQueryIdRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/c/$connectionId'
+    | '/chat/$threadId'
     | '/c/$connectionId/'
     | '/c/$connectionId/chat/$threadId'
     | '/c/$connectionId/sql/$queryId'
@@ -96,6 +106,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/settings'
+    | '/chat/$threadId'
     | '/c/$connectionId'
     | '/c/$connectionId/chat/$threadId'
     | '/c/$connectionId/sql/$queryId'
@@ -105,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/c/$connectionId'
+    | '/chat/$threadId'
     | '/c/$connectionId/'
     | '/c/$connectionId/chat/$threadId'
     | '/c/$connectionId/sql/$queryId'
@@ -115,6 +127,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
   CConnectionIdRoute: typeof CConnectionIdRouteWithChildren
+  ChatThreadIdRoute: typeof ChatThreadIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -138,6 +151,13 @@ declare module '@tanstack/react-router' {
       path: '/c/$connectionId'
       fullPath: '/c/$connectionId'
       preLoaderRoute: typeof CConnectionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat/$threadId': {
+      id: '/chat/$threadId'
+      path: '/chat/$threadId'
+      fullPath: '/chat/$threadId'
+      preLoaderRoute: typeof ChatThreadIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/c/$connectionId/': {
@@ -193,6 +213,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
   CConnectionIdRoute: CConnectionIdRouteWithChildren,
+  ChatThreadIdRoute: ChatThreadIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

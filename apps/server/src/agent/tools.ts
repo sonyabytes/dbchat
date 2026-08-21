@@ -1,15 +1,19 @@
-/**
- * In-process MCP server exposing the database to the model. Every tool runs an
- * Effect through `ctx.run` (the session's runtime) because SDK handlers are plain
- * async functions.
- */
+/** Guarded, provider-neutral tools for attached database and Git sources. */
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
-import type { ChatEvent, ColumnMeta, ConnectionId, MessageId } from "@dbchat/contracts";
+import type {
+  ChatEvent,
+  ColumnMeta,
+  Connection,
+  ConnectionId,
+  GitRepository,
+  MessageId,
+} from "@dbchat/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { z } from "zod";
 
 import type { Driver } from "../Services/DriverRegistry.ts";
+import { inspectGitRepository, readGitFile, searchGitRepository } from "./git.ts";
 import { MCP_SERVER_NAME } from "./events.ts";
 
 export const MAX_ROWS = 500;
@@ -28,97 +32,138 @@ export interface ProposeWriteOutcome {
   readonly error?: string;
 }
 
-export const DBCHAT_TOOL_NAMES = ["list_schemas", "describe_table", "sample_rows", "run_sql", "explain", "propose_write"] as const;
+export interface ToolDatabase {
+  readonly connection: Connection;
+  readonly driver: Effect.Effect<Driver, unknown>;
+}
+
+export const DBCHAT_TOOL_NAMES = [
+  "list_sources",
+  "list_schemas",
+  "describe_table",
+  "sample_rows",
+  "run_sql",
+  "explain",
+  "propose_write",
+  "list_models",
+  "search_models",
+  "read_model",
+] as const;
 export type DbchatToolName = (typeof DBCHAT_TOOL_NAMES)[number];
 
-/** Provider-neutral tool metadata used by Codex dynamic tools and the OpenCode MCP bridge. */
+const sourceIdProperty = {
+  sourceId: { type: "string", description: "Database source id; required when more than one database is attached" },
+};
+const repositoryIdProperty = {
+  repositoryId: { type: "string", description: "Git repository id; required when more than one repository is attached" },
+};
+
+/** Provider-neutral metadata used by Codex dynamic tools and the OpenCode bridge. */
 export const DBCHAT_TOOL_SPECS: ReadonlyArray<{
   readonly name: DbchatToolName;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
 }> = [
   {
-    name: "list_schemas",
-    description: "List schemas and their tables (with kind and approximate row counts).",
+    name: "list_sources",
+    description: "List every database and Git repository attached to this conversation, including ids required by other tools.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "list_schemas",
+    description: "List schemas and tables in one attached database.",
+    inputSchema: { type: "object", properties: sourceIdProperty, additionalProperties: false },
+  },
+  {
     name: "describe_table",
-    description: "Describe one table: columns (type, nullable, default), primary key, foreign keys and indexes.",
+    description: "Describe one table: columns, primary key, foreign keys, and indexes.",
     inputSchema: {
       type: "object",
-      properties: {
-        schema: { type: "string", description: "Schema name (e.g. public, main, a MySQL database, or a BigQuery dataset)" },
-        table: { type: "string" },
-      },
+      properties: { ...sourceIdProperty, schema: { type: "string" }, table: { type: "string" } },
       required: ["schema", "table"],
       additionalProperties: false,
     },
   },
   {
     name: "sample_rows",
-    description: `Return up to ${MAX_SAMPLE_ROWS} rows from a table to understand its data.`,
+    description: `Return up to ${MAX_SAMPLE_ROWS} rows from a table in one attached database.`,
     inputSchema: {
       type: "object",
-      properties: {
-        schema: { type: "string" },
-        table: { type: "string" },
-        limit: { type: "integer", minimum: 1, maximum: MAX_SAMPLE_ROWS },
-      },
+      properties: { ...sourceIdProperty, schema: { type: "string" }, table: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: MAX_SAMPLE_ROWS } },
       required: ["schema", "table"],
       additionalProperties: false,
     },
   },
   {
     name: "run_sql",
-    description: `Run a READ-ONLY SQL query (SELECT/WITH/SHOW/EXPLAIN). Rows are capped at ${MAX_ROWS}; writes are rejected and must use propose_write.`,
+    description: `Run a READ-ONLY SQL query against one attached database. Rows are capped at ${MAX_ROWS}.`,
     inputSchema: {
       type: "object",
-      properties: {
-        sql: { type: "string", description: "The SQL to execute" },
-        limit: { type: "integer", minimum: 1, maximum: MAX_ROWS },
-      },
+      properties: { ...sourceIdProperty, sql: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: MAX_ROWS } },
       required: ["sql"],
       additionalProperties: false,
     },
   },
   {
     name: "explain",
-    description: "Return the query plan (EXPLAIN) for a SQL statement without executing it against data.",
+    description: "Return the query plan for SQL against one attached database without executing it.",
     inputSchema: {
       type: "object",
-      properties: { sql: { type: "string" } },
+      properties: { ...sourceIdProperty, sql: { type: "string" } },
       required: ["sql"],
       additionalProperties: false,
     },
   },
   {
     name: "propose_write",
-    description: "Submit one data-changing statement. It runs only when policy permits AI writes or after the user approves it in dbchat.",
+    description: "Submit one data-changing statement against an explicitly scoped database. It runs only when policy permits or the user approves.",
     inputSchema: {
       type: "object",
       properties: {
-        sql: { type: "string", description: "Exact statement to run; one statement, inside a transaction" },
-        rationale: { type: "string", description: "What this changes and why" },
+        ...sourceIdProperty,
+        sql: { type: "string" },
+        rationale: { type: "string" },
         estimatedRows: { type: "integer", minimum: 0 },
       },
       required: ["sql", "rationale"],
       additionalProperties: false,
     },
   },
+  {
+    name: "list_models",
+    description: "List SQL/dbt models and documentation in an attached Git repository, pinned to its displayed commit.",
+    inputSchema: { type: "object", properties: repositoryIdProperty, additionalProperties: false },
+  },
+  {
+    name: "search_models",
+    description: "Search filenames and contents in an attached Git repository.",
+    inputSchema: {
+      type: "object",
+      properties: { ...repositoryIdProperty, query: { type: "string" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_model",
+    description: "Read one SQL, YAML, Markdown, manifest.json, or catalog.json file from an attached Git repository.",
+    inputSchema: {
+      type: "object",
+      properties: { ...repositoryIdProperty, path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export interface ToolContext {
-  readonly connectionId: ConnectionId;
+  readonly databases: ReadonlyArray<ToolDatabase>;
+  readonly repositories: ReadonlyArray<GitRepository>;
   readonly messageId: MessageId;
-  /** Run an Effect in the session runtime (errors are surfaced as tool errors). */
   readonly run: <A, E>(effect: Effect.Effect<A, E>) => Promise<A>;
-  /** Lazily acquire the thread's driver. */
-  readonly driver: Effect.Effect<Driver, unknown>;
-  /** Publish a ChatEvent on the thread (ResultTable, approvals). */
   readonly emit: (event: ChatEvent) => Effect.Effect<void>;
-  /** Approval flow: persist, emit ApprovalRequested, wait for resolution, execute. */
   readonly proposeWrite: (args: {
+    connectionId: ConnectionId;
     sql: string;
     rationale: string;
     estimatedRows?: number;
@@ -130,29 +175,28 @@ const ok = (value: unknown): ToolResult => ({
 });
 const err = (message: string): ToolResult => ({ content: [{ type: "text", text: message }], isError: true });
 
-const errorMessage = (e: unknown): string => {
-  if (e && typeof e === "object") {
-    const o = e as { _tag?: string; message?: string; reason?: string; sql?: string };
-    if (o._tag === "WriteBlocked") {
-      return `WriteBlocked: ${o.reason ?? "statement is not read-only"}. Data-changing statements must go through propose_write.`;
-    }
-    if (typeof o.message === "string") return `${o._tag ? `${o._tag}: ` : ""}${o.message}`;
+const errorMessage = (error: unknown): string => {
+  if (error && typeof error === "object") {
+    const value = error as { _tag?: string; message?: string; reason?: string };
+    if (value._tag === "WriteBlocked") return `WriteBlocked: ${value.reason ?? "statement is not allowed"}.`;
+    if (typeof value.message === "string") return `${value._tag ? `${value._tag}: ` : ""}${value.message}`;
   }
-  return String(e);
+  return String(error);
 };
 
-export const truncateCell = (v: unknown): unknown => {
-  if (typeof v === "string" && v.length > MAX_CELL_CHARS) return `${v.slice(0, MAX_CELL_CHARS)}… [truncated ${v.length - MAX_CELL_CHARS} chars]`;
-  if (v instanceof Date) return v.toISOString();
-  if (typeof v === "bigint") return v.toString();
-  if (v && typeof v === "object") {
-    const s = JSON.stringify(v);
-    return s.length > MAX_CELL_CHARS ? `${s.slice(0, MAX_CELL_CHARS)}…` : v;
+export const truncateCell = (value: unknown): unknown => {
+  if (typeof value === "string" && value.length > MAX_CELL_CHARS) {
+    return `${value.slice(0, MAX_CELL_CHARS)}… [truncated ${value.length - MAX_CELL_CHARS} chars]`;
   }
-  return v;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "bigint") return value.toString();
+  if (value && typeof value === "object") {
+    const serialized = JSON.stringify(value);
+    return serialized.length > MAX_CELL_CHARS ? `${serialized.slice(0, MAX_CELL_CHARS)}…` : value;
+  }
+  return value;
 };
 
-/** Collect a driver query stream into columns + rows (capped). */
 export const collectQuery = (
   driver: Driver,
   sql: string,
@@ -163,7 +207,6 @@ export const collectQuery = (
     let columns: ReadonlyArray<ColumnMeta> = [];
     const rows: unknown[][] = [];
     let truncated = false;
-    /** Set only on the write path; `undefined` means "count the rows instead". */
     let affectedRows: number | undefined;
     yield* driver.query(sql, { readOnly: options.readOnly, limit, ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) }).pipe(
       Stream.takeWhile(() => rows.length < limit),
@@ -171,12 +214,12 @@ export const collectQuery = (
         Effect.sync(() => {
           if (batch.columns.length > 0) columns = batch.columns;
           if (batch.affectedRows !== undefined) affectedRows = (affectedRows ?? 0) + batch.affectedRows;
-          for (const r of batch.rows) {
+          for (const row of batch.rows) {
             if (rows.length >= limit) {
               truncated = true;
               break;
             }
-            rows.push(r.map(truncateCell));
+            rows.push(row.map(truncateCell));
           }
         }),
       ),
@@ -184,51 +227,78 @@ export const collectQuery = (
     return { columns, rows: rows as ReadonlyArray<ReadonlyArray<unknown>>, truncated, affectedRows };
   });
 
-/** Wraps a tool body so any failure becomes an MCP tool error instead of crashing the turn. */
 const guarded =
   (ctx: ToolContext) =>
-  <A>(effect: Effect.Effect<ToolResult, A>) =>
-    ctx.run(effect.pipe(Effect.catch((e) => Effect.succeed(err(errorMessage(e)))))).catch((e: unknown) => err(errorMessage(e)));
+  <E>(effect: Effect.Effect<ToolResult, E>) =>
+    ctx.run(effect.pipe(Effect.catch((error) => Effect.succeed(err(errorMessage(error)))))).catch((error: unknown) => err(errorMessage(error)));
 
 const objectInput = (input: unknown): Record<string, unknown> =>
   input !== null && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
 
-/** Execute one dbchat tool independently of any agent SDK. */
+const resolveDatabase = (ctx: ToolContext, sourceId: unknown): ToolDatabase => {
+  if (typeof sourceId === "string" && sourceId) {
+    const database = ctx.databases.find(({ connection }) => connection.id === sourceId);
+    if (!database) throw new Error(`Database source is not attached: ${sourceId}`);
+    return database;
+  }
+  if (ctx.databases.length === 1) return ctx.databases[0]!;
+  if (ctx.databases.length === 0) throw new Error("No database source is attached to this conversation.");
+  throw new Error("sourceId is required because multiple databases are attached.");
+};
+
+const resolveRepository = (ctx: ToolContext, repositoryId: unknown): GitRepository => {
+  if (typeof repositoryId === "string" && repositoryId) {
+    const repository = ctx.repositories.find((candidate) => candidate.id === repositoryId);
+    if (!repository) throw new Error(`Git repository is not attached: ${repositoryId}`);
+    return repository;
+  }
+  if (ctx.repositories.length === 1) return ctx.repositories[0]!;
+  if (ctx.repositories.length === 0) throw new Error("No Git repository is attached to this conversation.");
+  throw new Error("repositoryId is required because multiple Git repositories are attached.");
+};
+
 export const invokeDbchatTool = (ctx: ToolContext, name: string, input: unknown): Promise<ToolResult> => {
   const g = guarded(ctx);
   const value = objectInput(input);
   const string = (key: string) => {
-    const v = value[key];
-    if (typeof v !== "string" || v.length === 0) throw new Error(`${key} must be a non-empty string`);
-    return v;
+    const candidate = value[key];
+    if (typeof candidate !== "string" || candidate.length === 0) throw new Error(`${key} must be a non-empty string`);
+    return candidate;
   };
   const optionalInt = (key: string, max?: number, min = 0) => {
-    const v = value[key];
-    if (v === undefined) return undefined;
-    if (typeof v !== "number" || !Number.isInteger(v) || v < min || (max !== undefined && v > max)) {
+    const candidate = value[key];
+    if (candidate === undefined) return undefined;
+    if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate < min || (max !== undefined && candidate > max)) {
       throw new Error(`${key} must be an integer${max === undefined ? ` at least ${min}` : ` between ${min} and ${max}`}`);
     }
-    return v;
+    return candidate;
   };
 
   try {
     switch (name) {
-      case "list_schemas":
+      case "list_sources":
+        return Promise.resolve(ok({
+          databases: ctx.databases.map(({ connection }) => ({ id: connection.id, name: connection.name, dialect: connection.dialect, database: connection.database, environment: connection.env })),
+          repositories: ctx.repositories.map((repository) => ({ id: repository.id, name: repository.name, branch: repository.branch, commit: repository.headCommit })),
+        }));
+      case "list_schemas": {
+        const database = resolveDatabase(ctx, value.sourceId);
         return g(Effect.gen(function* () {
-          const driver = yield* ctx.driver;
-          const schemas = yield* driver.introspect;
-          return ok(schemas.map((schema) => ({
+          const schemas = yield* (yield* database.driver).introspect;
+          return ok({ source: { id: database.connection.id, name: database.connection.name }, schemas: schemas.map((schema) => ({
             schema: schema.name,
             tables: schema.tables.map((table) => ({ name: table.name, kind: table.kind, rowEstimate: table.rowEstimate })),
-          })));
+          })) });
         }));
+      }
       case "describe_table": {
+        const database = resolveDatabase(ctx, value.sourceId);
         const schema = string("schema");
         const table = string("table");
         return g(Effect.gen(function* () {
-          const driver = yield* ctx.driver;
-          const detail = yield* driver.describeTable(schema, table);
+          const detail = yield* (yield* database.driver).describeTable(schema, table);
           return ok({
+            source: { id: database.connection.id, name: database.connection.name },
             table: detail.table,
             columns: detail.columns,
             primaryKey: detail.columns.filter((column) => column.isPrimaryKey).map((column) => column.name),
@@ -238,52 +308,59 @@ export const invokeDbchatTool = (ctx: ToolContext, name: string, input: unknown)
         }));
       }
       case "sample_rows": {
+        const database = resolveDatabase(ctx, value.sourceId);
         const schema = string("schema");
         const table = string("table");
         const limit = optionalInt("limit", MAX_SAMPLE_ROWS, 1);
         return g(Effect.gen(function* () {
-          const driver = yield* ctx.driver;
-          const page = yield* driver.rows({ connectionId: ctx.connectionId, schema, table, limit: Math.min(limit ?? 10, MAX_SAMPLE_ROWS), offset: 0 });
-          return ok({ columns: page.columns.map((column) => column.name), rows: page.rows.map((row) => row.map(truncateCell)), total: page.total });
+          const page = yield* (yield* database.driver).rows({ connectionId: database.connection.id, schema, table, limit: Math.min(limit ?? 10, MAX_SAMPLE_ROWS), offset: 0 });
+          return ok({ source: { id: database.connection.id, name: database.connection.name }, columns: page.columns.map((column) => column.name), rows: page.rows.map((row) => row.map(truncateCell)), total: page.total });
         }));
       }
       case "run_sql": {
+        const database = resolveDatabase(ctx, value.sourceId);
         const sql = string("sql");
         const limit = optionalInt("limit", MAX_ROWS, 1);
         return g(Effect.gen(function* () {
-          const driver = yield* ctx.driver;
           const started = Date.now();
-          const result = yield* collectQuery(driver, sql, { readOnly: true, limit: Math.max(1, limit ?? 100) });
+          const result = yield* collectQuery(yield* database.driver, sql, { readOnly: true, limit: Math.max(1, limit ?? 100) });
           const durationMs = Date.now() - started;
-          yield* ctx.emit({ _tag: "ResultTable", messageId: ctx.messageId, columns: result.columns, rows: result.rows, sql });
-          return ok({
-            columns: result.columns.map((column) => `${column.name}:${column.type}`),
-            rowCount: result.rows.length,
-            truncated: result.truncated,
-            durationMs,
-            rows: result.rows,
-          });
+          const source = { kind: "database" as const, id: database.connection.id };
+          yield* ctx.emit({ _tag: "ResultTable", messageId: ctx.messageId, columns: result.columns, rows: result.rows, sql, source });
+          return ok({ source: { id: database.connection.id, name: database.connection.name }, columns: result.columns.map((column) => `${column.name}:${column.type}`), rowCount: result.rows.length, truncated: result.truncated, durationMs, rows: result.rows });
         }));
       }
       case "explain": {
+        const database = resolveDatabase(ctx, value.sourceId);
         const sql = string("sql");
         return g(Effect.gen(function* () {
-          const driver = yield* ctx.driver;
-          return ok(yield* driver.explain(sql));
+          return ok({ source: { id: database.connection.id, name: database.connection.name }, plan: yield* (yield* database.driver).explain(sql) });
         }));
       }
       case "propose_write": {
+        const database = resolveDatabase(ctx, value.sourceId);
         const sql = string("sql");
         const rationale = string("rationale");
         const estimatedRows = optionalInt("estimatedRows");
         return g(Effect.gen(function* () {
-          const outcome = yield* ctx.proposeWrite({ sql, rationale, ...(estimatedRows !== undefined ? { estimatedRows } : {}) });
-          switch (outcome.status) {
-            case "executed": return ok({ status: "executed", rowCount: outcome.rowCount ?? null });
-            case "rejected": return ok({ status: "rejected", note: "The user rejected this write. Do not retry it unless they ask." });
-            case "failed": return err(`Write failed: ${outcome.error ?? "unknown error"}`);
-          }
+          const outcome = yield* ctx.proposeWrite({ connectionId: database.connection.id, sql, rationale, ...(estimatedRows !== undefined ? { estimatedRows } : {}) });
+          if (outcome.status === "executed") return ok({ source: database.connection.name, status: "executed", rowCount: outcome.rowCount ?? null });
+          if (outcome.status === "rejected") return ok({ source: database.connection.name, status: "rejected", note: "The user rejected this write." });
+          return err(`Write failed on ${database.connection.name}: ${outcome.error ?? "unknown error"}`);
         }));
+      }
+      case "list_models": {
+        const repository = resolveRepository(ctx, value.repositoryId);
+        return Promise.resolve(ok({ repository: repository.name, branch: repository.branch, commit: repository.headCommit, models: inspectGitRepository(repository) }));
+      }
+      case "search_models": {
+        const repository = resolveRepository(ctx, value.repositoryId);
+        return Promise.resolve(ok({ repository: repository.name, commit: repository.headCommit, results: searchGitRepository(repository, string("query")) }));
+      }
+      case "read_model": {
+        const repository = resolveRepository(ctx, value.repositoryId);
+        const path = string("path");
+        return Promise.resolve(ok({ repository: repository.name, path, branch: repository.branch, commit: repository.headCommit, content: readGitFile(repository, path) }));
       }
       default:
         return Promise.resolve(err(`Unknown tool: ${name}`));
@@ -293,52 +370,23 @@ export const invokeDbchatTool = (ctx: ToolContext, name: string, input: unknown)
   }
 };
 
-export const makeDbchatMcpServer = (ctx: ToolContext) => {
-  return createSdkMcpServer({
-    name: MCP_SERVER_NAME,
-    version: "0.1.0",
-    alwaysLoad: true,
-    tools: [
-      tool(
-        "list_schemas",
-        "List schemas and their tables (with kind and approximate row counts).",
-        {},
-        () => invokeDbchatTool(ctx, "list_schemas", {}),
-      ),
-      tool(
-        "describe_table",
-        "Describe one table: columns (type, nullable, default), primary key, foreign keys and indexes.",
-        { schema: z.string().describe("Schema name (e.g. public, main, a MySQL database, or a BigQuery dataset)"), table: z.string() },
-        (input) => invokeDbchatTool(ctx, "describe_table", input),
-      ),
-      tool(
-        "sample_rows",
-        `Return up to ${MAX_SAMPLE_ROWS} rows from a table to understand its data.`,
-        { schema: z.string(), table: z.string(), limit: z.number().int().min(1).max(MAX_SAMPLE_ROWS).optional() },
-        (input) => invokeDbchatTool(ctx, "sample_rows", input),
-      ),
-      tool(
-        "run_sql",
-        `Run a READ-ONLY SQL query (SELECT/WITH/SHOW/EXPLAIN). Rows are capped at ${MAX_ROWS}; the user sees the results as a grid automatically, so do not repeat them verbatim. Writes are rejected: use propose_write.`,
-        { sql: z.string().describe("The SQL to execute"), limit: z.number().int().min(1).max(MAX_ROWS).optional().describe(`Row cap (default 100, max ${MAX_ROWS})`) },
-        (input) => invokeDbchatTool(ctx, "run_sql", input),
-      ),
-      tool(
-        "explain",
-        "Return the query plan (EXPLAIN) for a SQL statement without executing it against data.",
-        { sql: z.string() },
-        (input) => invokeDbchatTool(ctx, "explain", input),
-      ),
-      tool(
-        "propose_write",
-        "Submit one data-changing statement (INSERT/UPDATE/DELETE/DDL). It runs only when the connection policy permits AI writes or after the user approves it in the UI; approval waits up to 10 minutes. Returns the row count on success or a rejection notice.",
-        {
-          sql: z.string().describe("Exact statement to run. One statement; it runs inside a transaction."),
-          rationale: z.string().describe("One or two sentences: what this changes and why."),
-          estimatedRows: z.number().int().nonnegative().optional().describe("Estimated affected rows, if known"),
-        },
-        (input) => invokeDbchatTool(ctx, "propose_write", input),
-      ),
-    ],
-  });
-};
+const sourceId = z.string().optional().describe("Database source id; required with multiple attached databases");
+const repositoryId = z.string().optional().describe("Git repository id; required with multiple attached repositories");
+
+export const makeDbchatMcpServer = (ctx: ToolContext) => createSdkMcpServer({
+  name: MCP_SERVER_NAME,
+  version: "0.1.0",
+  alwaysLoad: true,
+  tools: [
+    tool("list_sources", "List attached database and Git sources with their ids.", {}, () => invokeDbchatTool(ctx, "list_sources", {})),
+    tool("list_schemas", "List schemas and tables in one attached database.", { sourceId }, (input) => invokeDbchatTool(ctx, "list_schemas", input)),
+    tool("describe_table", "Describe a table in one attached database.", { sourceId, schema: z.string(), table: z.string() }, (input) => invokeDbchatTool(ctx, "describe_table", input)),
+    tool("sample_rows", `Return up to ${MAX_SAMPLE_ROWS} rows from a table.`, { sourceId, schema: z.string(), table: z.string(), limit: z.number().int().min(1).max(MAX_SAMPLE_ROWS).optional() }, (input) => invokeDbchatTool(ctx, "sample_rows", input)),
+    tool("run_sql", "Run a read-only query against one attached database.", { sourceId, sql: z.string(), limit: z.number().int().min(1).max(MAX_ROWS).optional() }, (input) => invokeDbchatTool(ctx, "run_sql", input)),
+    tool("explain", "Explain SQL against one attached database.", { sourceId, sql: z.string() }, (input) => invokeDbchatTool(ctx, "explain", input)),
+    tool("propose_write", "Propose one database write, subject to the connection's approval policy.", { sourceId, sql: z.string(), rationale: z.string(), estimatedRows: z.number().int().nonnegative().optional() }, (input) => invokeDbchatTool(ctx, "propose_write", input)),
+    tool("list_models", "List SQL/dbt models in an attached Git repository.", { repositoryId }, (input) => invokeDbchatTool(ctx, "list_models", input)),
+    tool("search_models", "Search an attached Git repository for model context.", { repositoryId, query: z.string() }, (input) => invokeDbchatTool(ctx, "search_models", input)),
+    tool("read_model", "Read one model or documentation file from an attached Git repository.", { repositoryId, path: z.string() }, (input) => invokeDbchatTool(ctx, "read_model", input)),
+  ],
+});

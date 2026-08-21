@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect } from "react";
 
-import { type Tab, tabPath, useApp } from "./store";
+import { GLOBAL_WORKSPACE_ID, type Tab, tabPath, useApp } from "./store";
 
 /** Current connection id from the /c/$connectionId route subtree. */
 export function useConnectionId(): string {
@@ -19,7 +19,7 @@ export function useOpenTab() {
   const openTab = useApp((s) => s.openTab);
   return useCallback(
     (t: Tab, search?: Record<string, string>) => {
-      openTab(t, connectionId);
+      openTab(t, t.kind === "chat" ? GLOBAL_WORKSPACE_ID : connectionId);
       void navigate({ to: tabPath(connectionId, t), ...(search ? { search: search as never } : {}) });
     },
     [navigate, connectionId, openTab],
@@ -31,7 +31,7 @@ export function useRegisterTab(t: Tab) {
   const openTab = useApp((s) => s.openTab);
   const connectionId = useConnectionId();
   useEffect(() => {
-    openTab(t, connectionId);
+    openTab(t, t.kind === "chat" ? GLOBAL_WORKSPACE_ID : connectionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.id, connectionId, "title" in t ? t.title : ""]);
 }
@@ -47,7 +47,7 @@ export function useCloseTab() {
       const wasActive = activeTab === id;
       const next = closeTab(id);
       if (!wasActive) return;
-      void navigate({ to: next ? tabPath(connectionId, next) : `/c/${encodeURIComponent(connectionId)}` });
+      void navigate({ to: next ? tabPath(connectionId, next) : connectionId ? `/c/${encodeURIComponent(connectionId)}` : "/" });
     },
     [navigate, connectionId, closeTab, activeTab],
   );

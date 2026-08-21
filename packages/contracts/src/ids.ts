@@ -5,6 +5,8 @@ const makeId = <Brand extends string>(brand: Brand) =>
 
 export const ConnectionId = makeId("ConnectionId");
 export type ConnectionId = typeof ConnectionId.Type;
+export const RepositoryId = makeId("RepositoryId");
+export type RepositoryId = typeof RepositoryId.Type;
 export const ThreadId = makeId("ThreadId");
 export type ThreadId = typeof ThreadId.Type;
 export const QueryId = makeId("QueryId");
