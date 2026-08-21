@@ -57,6 +57,41 @@ describe("work item data workspaces", () => {
     expect(useApp.getState().dataWorkspaces["new-draft"]).toBeUndefined();
     expect(useApp.getState().dataWorkspaces["thread-1"]).toEqual({ tabs: [users], activeTab: users.id });
   });
+
+  test("keeps Explorer and focus preferences isolated per work item", () => {
+    useApp.getState().setDataExplorerFilter("work-a", "customer");
+    useApp.getState().setDataWorkspaceFocused("work-a", true);
+    useApp.getState().setDataExplorerFilter("work-b", "orders");
+
+    expect(useApp.getState().dataWorkspaces["work-a"]).toMatchObject({
+      tabs: [],
+      activeTab: null,
+      explorerFilter: "customer",
+      focused: true,
+    });
+    expect(useApp.getState().dataWorkspaces["work-b"]).toMatchObject({
+      tabs: [],
+      activeTab: null,
+      explorerFilter: "orders",
+    });
+    expect(useApp.getState().dataWorkspaces["work-b"]?.focused).toBeUndefined();
+  });
+
+  test("opening and closing tables preserves work-item Explorer preferences", () => {
+    const users = dataTable("c1", "public", "users");
+    useApp.getState().setDataExplorerFilter("work-a", "user");
+    useApp.getState().setDataWorkspaceFocused("work-a", true);
+
+    useApp.getState().openDataTab("work-a", users);
+    useApp.getState().closeDataTab("work-a", users.id);
+
+    expect(useApp.getState().dataWorkspaces["work-a"]).toMatchObject({
+      tabs: [],
+      activeTab: null,
+      explorerFilter: "user",
+      focused: true,
+    });
+  });
 });
 
 describe("tabIds / tabPath", () => {

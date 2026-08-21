@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { MessageSquare, Moon, Plus, Search, Settings, Sun } from "lucide-react";
+import { usePanelRef } from "react-resizable-panels";
 
 import { ThreadList } from "@/components/chat/thread-list";
 import { WorkItemDataPane } from "@/components/data/work-item-data-pane";
@@ -26,6 +27,7 @@ export function HomeWorkspace({ children }: { children: React.ReactNode }) {
   const activeTab = useApp((state) => state.activeTab);
   const dark = useApp((state) => state.dark);
   const setGlobalWorkspace = useApp((state) => state.setGlobalWorkspace);
+  const conversationPanelRef = usePanelRef();
 
   useGlobalKeybindings();
   useEffect(() => setGlobalWorkspace(), [setGlobalWorkspace]);
@@ -33,6 +35,11 @@ export function HomeWorkspace({ children }: { children: React.ReactNode }) {
   const active = tabs.find((tab) => tab.id === activeTab);
   const workItemId = active?.kind === "chat" ? active.threadId : "home";
   const workItemTitle = active?.kind === "chat" ? active.title : "New work item";
+  const dataFocused = useApp((state) => state.dataWorkspaces[workItemId]?.focused ?? false);
+  useEffect(() => {
+    if (dataFocused) conversationPanelRef.current?.collapse();
+    else conversationPanelRef.current?.expand();
+  }, [conversationPanelRef, dataFocused]);
   const newChat = () => {
     const threadId = newDraftId();
     openTab({ id: tabIds.chat(threadId), kind: "chat", threadId, title: "New work item" });
@@ -78,7 +85,14 @@ export function HomeWorkspace({ children }: { children: React.ReactNode }) {
       </aside>
 
       <ResizablePanelGroup orientation="horizontal" className="min-w-0 flex-1">
-        <ResizablePanel defaultSize={52} minSize={30} className="flex min-h-0 flex-col bg-surface">
+        <ResizablePanel
+          panelRef={conversationPanelRef}
+          defaultSize="52%"
+          minSize="30%"
+          collapsible
+          collapsedSize="0%"
+          className="flex min-h-0 flex-col bg-surface"
+        >
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 text-xs">
             <MessageSquare className="size-3.5 text-brand" />
             <span className="truncate font-medium">{workItemTitle}</span>
@@ -86,9 +100,9 @@ export function HomeWorkspace({ children }: { children: React.ReactNode }) {
           </div>
           <div className="min-h-0 flex-1">{children}</div>
         </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={48} minSize={30} className="min-h-0 bg-canvas">
-          <WorkItemDataPane workItemId={workItemId} />
+        <ResizableHandle withHandle className={dataFocused ? "pointer-events-none opacity-0" : undefined} />
+        <ResizablePanel defaultSize="48%" minSize="30%" className="min-h-0 bg-canvas">
+          <WorkItemDataPane key={workItemId} workItemId={workItemId} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

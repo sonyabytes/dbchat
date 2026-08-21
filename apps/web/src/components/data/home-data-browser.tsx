@@ -66,8 +66,8 @@ function DatabaseSection({
   };
 
   return (
-    <Collapsible open={expanded} onOpenChange={setOpen} className="rounded-md border border-line bg-canvas">
-      <div className="flex h-9 items-center gap-0.5 px-1">
+    <Collapsible open={expanded} onOpenChange={setOpen} className="min-w-0 max-w-full rounded-md border border-line bg-canvas">
+      <div className="flex h-9 min-w-0 items-center gap-0.5 overflow-hidden px-1">
         <CollapsibleTrigger render={<Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start" />}>
           {expanded ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
           <DialectIcon dialect={connection.dialect} />
@@ -95,7 +95,7 @@ function DatabaseSection({
           </Tooltip>
         ) : null}
       </div>
-      <CollapsibleContent className="border-t border-line px-1 py-1">
+      <CollapsibleContent className="min-w-0 max-w-full overflow-x-hidden border-t border-line px-1 py-1">
         <SchemaTree connectionId={connection.id} filter={filter} onOpenTable={openTable} />
       </CollapsibleContent>
     </Collapsible>
@@ -126,7 +126,7 @@ export function HomeDataBrowser({
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-1.5">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-1.5 overflow-x-hidden">
       <div className="flex h-7 items-center gap-1.5 px-1 text-xs font-medium">
         <Database className="size-3.5 text-brand" />
         <span>Databases</span>

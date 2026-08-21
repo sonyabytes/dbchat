@@ -42,6 +42,9 @@ interface ConnectionWorkspace {
 interface DataWorkspace {
   tabs: DataTab[];
   activeTab: string | null;
+  /** Explorer and layout preferences belong to this work item, not the app globally. */
+  explorerFilter?: string;
+  focused?: boolean;
 }
 
 const emptyWorkspace = (): ConnectionWorkspace => ({ tabs: [], activeTab: null });
@@ -79,6 +82,8 @@ interface AppState {
   openDataTab: (workItemId: string, tab: DataTab) => void;
   closeDataTab: (workItemId: string, tabId: string) => void;
   setActiveDataTab: (workItemId: string, tabId: string | null) => void;
+  setDataExplorerFilter: (workItemId: string, filter: string) => void;
+  setDataWorkspaceFocused: (workItemId: string, focused: boolean) => void;
   moveDataWorkspace: (fromWorkItemId: string, toWorkItemId: string) => void;
   removeDataWorkspace: (workItemId: string) => void;
   removeConnectionWorkspace: (connectionId: string) => void;
@@ -229,7 +234,7 @@ export const useApp = create<AppState>()(
           return {
             dataWorkspaces: {
               ...s.dataWorkspaces,
-              [workItemId]: { tabs, activeTab: tab.id },
+              [workItemId]: { ...workspace, tabs, activeTab: tab.id },
             },
           };
         }),
@@ -246,7 +251,7 @@ export const useApp = create<AppState>()(
           return {
             dataWorkspaces: {
               ...s.dataWorkspaces,
-              [workItemId]: { tabs, activeTab },
+              [workItemId]: { ...workspace, tabs, activeTab },
             },
           };
         }),
@@ -258,6 +263,28 @@ export const useApp = create<AppState>()(
             dataWorkspaces: {
               ...s.dataWorkspaces,
               [workItemId]: { ...workspace, activeTab: tabId },
+            },
+          };
+        }),
+      setDataExplorerFilter: (workItemId, filter) =>
+        set((s) => {
+          const workspace = s.dataWorkspaces[workItemId] ?? emptyDataWorkspace();
+          if ((workspace.explorerFilter ?? "") === filter) return s;
+          return {
+            dataWorkspaces: {
+              ...s.dataWorkspaces,
+              [workItemId]: { ...workspace, explorerFilter: filter },
+            },
+          };
+        }),
+      setDataWorkspaceFocused: (workItemId, focused) =>
+        set((s) => {
+          const workspace = s.dataWorkspaces[workItemId] ?? emptyDataWorkspace();
+          if ((workspace.focused ?? false) === focused) return s;
+          return {
+            dataWorkspaces: {
+              ...s.dataWorkspaces,
+              [workItemId]: { ...workspace, focused },
             },
           };
         }),
@@ -283,7 +310,7 @@ export const useApp = create<AppState>()(
               const activeTab = tabs.some((tab) => tab.id === workspace.activeTab)
                 ? workspace.activeTab
                 : tabs[0]?.id ?? null;
-              return [workItemId, { tabs, activeTab }];
+              return [workItemId, { ...workspace, tabs, activeTab }];
             }),
           );
           if (s.tabsConnectionId !== connectionId) return { workspaces, sqlDrafts, dataWorkspaces };

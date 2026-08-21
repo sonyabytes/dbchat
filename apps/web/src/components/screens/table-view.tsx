@@ -380,7 +380,7 @@ export function TableView({
 
   return (
     <div className="@container flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+      <div className="flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-line px-3 py-1 @3xl:h-10 @3xl:flex-nowrap @3xl:py-0">
         <span className="font-mono text-xs text-ink-3">{schema}.</span>
         <span className="-ml-2 font-medium">{table}</span>
         {total !== undefined && <CountBadge n={total} />}
@@ -390,7 +390,7 @@ export function TableView({
             <TabsTrigger value="structure" className="h-6 px-2 text-xs">Structure</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="flex w-full min-w-0 items-center justify-end gap-1 @3xl:ml-auto @3xl:w-auto">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-ink-3" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter page" className="h-7 w-32 pl-7 text-xs @3xl:w-48" />
