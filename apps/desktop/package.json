@@ -10,7 +10,7 @@
   "scripts": {
     "build": "bun scripts/build-main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "echo no tests",
+    "test": "bun test",
     "start": "bun scripts/build-main.ts && electron .",
     "icon": "bun scripts/make-icon.ts",
     "dist": "bun scripts/build-main.ts && electron-builder --mac dmg --arm64 --config electron-builder.yml"
