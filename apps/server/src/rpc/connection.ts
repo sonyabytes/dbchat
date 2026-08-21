@@ -12,6 +12,12 @@ export const connectionHandlers = Effect.gen(function* () {
 
   return {
     [RPC.connectionList]: () => store.list,
+    [RPC.connectionCredentials]: ({ id }) =>
+      store.get(id).pipe(
+        Effect.andThen(store.getSecret(id)),
+        Effect.map(Option.getOrUndefined),
+        Effect.map((secret) => secret ?? {}),
+      ),
     [RPC.connectionCreate]: (input) => store.create(input),
     [RPC.connectionUpdate]: ({ id, input }) =>
       // Metadata or credentials may have changed, so drop the open driver.

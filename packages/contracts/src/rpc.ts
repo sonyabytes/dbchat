@@ -4,7 +4,7 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { ClaudeRuntimeSettings, ClaudeRuntimeStatus, ProviderModels } from "./ai.ts";
 import { ApprovalResolveInput, ChatEvent, ChatSendInput, Message, Thread, ThreadCreateInput } from "./chat.ts";
-import { Connection, ConnectionInput, ConnectionStatus, ConnectionTestResult } from "./connection.ts";
+import { Connection, ConnectionCredentials, ConnectionInput, ConnectionStatus, ConnectionTestResult } from "./connection.ts";
 import { AgentError, ConnectionError, DriverError, NotFound, SqlError, ValidationError, WriteBlocked } from "./errors.ts";
 import { ConnectionId, QueryId, RunId, ThreadId } from "./ids.ts";
 import { SchemaMeta, TableDetail } from "./schema.ts";
@@ -34,6 +34,7 @@ const SqlErrors = Schema.Union([ConnectionError, DriverError, SqlError, NotFound
 export const RPC = {
   serverHealth: "server.health",
   connectionList: "connection.list",
+  connectionCredentials: "connection.credentials",
   connectionCreate: "connection.create",
   connectionUpdate: "connection.update",
   connectionDelete: "connection.delete",
@@ -72,6 +73,7 @@ export class DbchatRpcs extends RpcGroup.make(
 
   /* ---- connections ---- */
   Rpc.make(RPC.connectionList, { success: Schema.Array(Connection) }),
+  Rpc.make(RPC.connectionCredentials, { payload: ById, success: ConnectionCredentials, error: NotFound }),
   Rpc.make(RPC.connectionCreate, {
     payload: ConnectionInput,
     success: Connection,
