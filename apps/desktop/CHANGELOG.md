@@ -1,5 +1,11 @@
 # @dbchat/desktop
 
+## 0.3.0
+
+### Patch Changes
+
+- 1501902: Reduce idle memory: lazy-load the SQL editor (CodeMirror) and chat markdown renderer, load `node-sql-parser` on first use in the server (idle RSS ~108 MB → ~56 MB), and cap the renderer V8 heap.
+
 ## 0.2.0
 
 ### Patch Changes
