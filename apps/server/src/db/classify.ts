@@ -14,7 +14,7 @@
  * The parser alone is bypassable, so this is deliberately belt-and-braces;
  * transactional drivers additionally run reads inside a READ ONLY transaction.
  */
-import { Parser } from "node-sql-parser";
+import type { Parser as SqlParser } from "node-sql-parser";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "bigquery";
 
@@ -295,8 +295,21 @@ const astKind = (ast: Ast): { kind: StatementKind; reason?: string } => {
 /*  Public API                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * node-sql-parser bundles every dialect grammar (several MB of JS). Load it on the first
+ * classification instead of at sidecar startup; the binding stays synchronous via require().
+ */
+let parserInstance: SqlParser | undefined;
+const getParser = (): SqlParser => {
+  if (!parserInstance) {
+    const { Parser } = require("node-sql-parser") as typeof import("node-sql-parser");
+    parserInstance = new Parser();
+  }
+  return parserInstance;
+};
+
 export const classifyStatements = (sql: string, dialect: Dialect): ReadonlyArray<ClassifiedStatement> => {
-  const parser = new Parser();
+  const parser = getParser();
   return splitStatements(sql, dialect).map((stmt): ClassifiedStatement => {
     const scrubbed = scrub(stmt, dialect);
     const lead = leadingKeyword(scrubbed);

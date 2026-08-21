@@ -1,13 +1,14 @@
 import type { MessagePart } from "@dbchat/contracts";
 import { Check, Copy, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { ThinkingState, ToolChip } from "@/components/shared/primitives";
 import { Button } from "@/components/ui/button";
 import type { UiMessage } from "@/lib/chat-store";
 
 import { ApprovalCard } from "./approval-card";
-import { Markdown } from "./markdown";
+// react-markdown + remark-gfm (~120 kB) load on first assistant message, not at startup.
+const Markdown = lazy(() => import("./markdown").then((m) => ({ default: m.Markdown })));
 import { ResultGrid } from "./result-grid";
 
 type ToolPart = Extract<MessagePart, { _tag: "ToolCall" }>;
@@ -186,7 +187,9 @@ export function ChatMessage({
                     : undefined
                 }
               >
-                <Markdown onOpenSql={onOpenSql}>{p.text}</Markdown>
+                <Suspense fallback={<p className="whitespace-pre-wrap">{p.text}</p>}>
+                  <Markdown onOpenSql={onOpenSql}>{p.text}</Markdown>
+                </Suspense>
               </div>
             ) : null;
           case "ResultTable":

@@ -1,10 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 
-import { SqlEditor } from "@/components/screens/sql-editor";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useRegisterTab } from "@/lib/nav";
 import { tabIds, useApp } from "@/lib/store";
 import { savedQueriesQuery } from "@/rpc/sql";
+
+// CodeMirror is ~340 kB of JS; only pay for it (parse + heap) once a SQL tab is opened.
+const SqlEditor = lazy(() => import("@/components/screens/sql-editor").then((m) => ({ default: m.SqlEditor })));
 
 interface SqlSearch {
   /** Prefilled SQL — used by chat's "open in editor". */
@@ -24,7 +28,11 @@ function SqlRoute() {
         ? "untitled.sql"
         : `${queryId}.sql`;
   useRegisterTab({ id: tabIds.sql(queryId), kind: "sql", queryId, title });
-  return <SqlEditor key={`${connectionId}:${queryId}`} queryId={queryId} />;
+  return (
+    <Suspense fallback={<Skeleton className="m-3 h-full" />}>
+      <SqlEditor key={`${connectionId}:${queryId}`} queryId={queryId} />
+    </Suspense>
+  );
 }
 
 export const Route = createFileRoute("/c/$connectionId/sql/$queryId")({
