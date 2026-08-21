@@ -15,7 +15,7 @@ import { DialectIcon, EnvBadge, Eyebrow, StatusDot } from "@/components/shared/p
 import { relativeTime } from "@/lib/format";
 import { usePalette } from "@/lib/palette";
 import { toggleTheme } from "@/lib/settings";
-import { useApp } from "@/lib/store";
+import { tabPath, useApp } from "@/lib/store";
 import { connectionApi, connectionConnectQuery, connectionKeys } from "@/rpc/connections";
 import { connectionListQuery, rpcErrorMessage } from "@/rpc/queries";
 
@@ -125,7 +125,9 @@ export function ConnectionsScreen() {
       }
       setStatuses((s) => ({ ...s, [c.id]: { state: "connected", ...(status.latencyMs !== undefined ? { latencyMs: status.latencyMs } : {}) } }));
       void queryClient.invalidateQueries({ queryKey: connectionKeys.list });
-      void navigate({ to: "/c/$connectionId/chat/$threadId", params: { connectionId: c.id, threadId: "home" } });
+      const restored = useApp.getState().restorableTab(c.id);
+      if (restored) void navigate({ to: tabPath(c.id, restored) });
+      else void navigate({ to: "/c/$connectionId/chat/$threadId", params: { connectionId: c.id, threadId: "home" } });
     } catch (e) {
       setStatuses((s) => ({ ...s, [c.id]: { state: "error", error: rpcErrorMessage(e) } }));
     }
