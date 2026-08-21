@@ -7,10 +7,11 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Bot, Database, Keyboard, Monitor, Moon, Sun } from "lucide-react";
+import { ArrowLeft, Bot, Database, Keyboard, Monitor, Moon, Sun, Terminal } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { TierPill } from "@/components/chat/model-picker";
+import { ClaudeRuntimeSection } from "@/components/settings/claude-runtime-section";
 import { Eyebrow } from "@/components/shared/primitives";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -122,7 +123,7 @@ export function SettingsScreen() {
 
       <main className="mx-auto w-full max-w-2xl flex-1 px-4 pb-16 pt-6">
         <h1 className="mb-1 text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mb-6 text-ink-2">Stored in this browser. Nothing here is sent to the server.</p>
+        <p className="mb-6 text-ink-2">Stored in this browser, except the Claude instance section which lives on the server.</p>
 
         <div className="flex flex-col gap-3">
           <Section icon={<Sun className="size-3.5" />} title="Appearance" description="Theme follows your OS unless you pin it.">
@@ -215,6 +216,14 @@ export function SettingsScreen() {
                 aria-label="Include current table as context"
               />
             </Row>
+          </Section>
+
+          <Section
+            icon={<Terminal className="size-3.5" />}
+            title="Claude instance"
+            description="Which Claude Code install and login the AI chat runs on. Saved on the server; env vars from your login shell (ANTHROPIC_BASE_URL, Bedrock, AWS_*) are picked up automatically."
+          >
+            <ClaudeRuntimeSection />
           </Section>
 
           <Section icon={<Keyboard className="size-3.5" />} title="Keyboard shortcuts" description="Ctrl replaces ⌘ on Windows and Linux.">

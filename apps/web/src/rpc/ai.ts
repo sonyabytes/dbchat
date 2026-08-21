@@ -1,5 +1,5 @@
 /** ai.* RPC helpers — the model catalog, grouped by provider. */
-import type { ModelInfo, ProviderModels } from "@dbchat/contracts";
+import type { ClaudeRuntimeSettings, ModelInfo, ProviderModels } from "@dbchat/contracts";
 import { RPC } from "@dbchat/contracts";
 import { queryOptions } from "@tanstack/react-query";
 
@@ -44,3 +44,16 @@ export const modelLabel = (
   catalog: ReadonlyArray<ProviderModels> | undefined,
   id: string | null | undefined,
 ): string | undefined => (id ? (findModel(catalog, id)?.label ?? id) : undefined);
+
+/* ---- Claude runtime (binary / config dir / login probe) ---- */
+
+export const claudeSettingsQuery = queryOptions({
+  queryKey: ["ai.claude.get"],
+  queryFn: () => callRpc((c) => c[RPC.aiClaudeGet]()),
+});
+
+export const saveClaudeSettings = (settings: ClaudeRuntimeSettings) => callRpc((c) => c[RPC.aiClaudeSet](settings));
+
+/** Probe with unsaved settings (or the saved ones when omitted). */
+export const probeClaudeStatus = (settings?: ClaudeRuntimeSettings) =>
+  callRpc((c) => c[RPC.aiClaudeStatus](settings));

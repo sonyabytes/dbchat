@@ -1,6 +1,6 @@
 /** Inline SQL suggestion: one fast, tool-less Haiku call. Never throws to the UI. */
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { claudeCliOption } from "./session.ts";
+import { claudeSdkOptions } from "./claudeRuntime.ts";
 import type { SqlSuggestResult } from "@dbchat/contracts";
 import * as Effect from "effect/Effect";
 
@@ -52,9 +52,7 @@ export const runSuggest = (prompt: string, cwd: string): Effect.Effect<SqlSugges
         thinking: { type: "disabled" },
         persistSession: false,
         strictMcpConfig: true,
-        settingSources: [],
-        env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "dbchat-suggest/0.1.0" },
-        ...claudeCliOption(),
+        ...claudeSdkOptions("dbchat-suggest/0.1.0"),
       },
     });
     const onAbort = () => q.interrupt().catch(() => undefined);

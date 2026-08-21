@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { ProviderModels } from "./ai.ts";
+import { ClaudeRuntimeSettings, ClaudeRuntimeStatus, ProviderModels } from "./ai.ts";
 import { ApprovalResolveInput, ChatEvent, ChatSendInput, Message, Thread, ThreadCreateInput } from "./chat.ts";
 import { Connection, ConnectionInput, ConnectionStatus, ConnectionTestResult } from "./connection.ts";
 import { AgentError, ConnectionError, DriverError, NotFound, SqlError, ValidationError, WriteBlocked } from "./errors.ts";
@@ -61,6 +61,9 @@ export const RPC = {
   chatApprovalResolve: "chat.approval.resolve",
   chatEvents: "chat.events",
   aiModels: "ai.models",
+  aiClaudeGet: "ai.claude.get",
+  aiClaudeSet: "ai.claude.set",
+  aiClaudeStatus: "ai.claude.status",
 } as const;
 
 export class DbchatRpcs extends RpcGroup.make(
@@ -135,6 +138,10 @@ export class DbchatRpcs extends RpcGroup.make(
 
   /* ---- ai ---- */
   Rpc.make(RPC.aiModels, { success: Schema.Array(ProviderModels) }),
+  Rpc.make(RPC.aiClaudeGet, { success: ClaudeRuntimeSettings }),
+  Rpc.make(RPC.aiClaudeSet, { payload: ClaudeRuntimeSettings, success: ClaudeRuntimeSettings }),
+  /** Probes `claude auth status` with the given (unsaved) settings, or the saved ones when omitted. */
+  Rpc.make(RPC.aiClaudeStatus, { payload: Schema.optional(ClaudeRuntimeSettings), success: ClaudeRuntimeStatus }),
 ) {}
 
 export type RpcTag = keyof typeof RPC extends infer K ? (K extends keyof typeof RPC ? (typeof RPC)[K] : never) : never;

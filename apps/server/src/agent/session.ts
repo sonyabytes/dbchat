@@ -19,6 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
 import type { Driver } from "../Services/DriverRegistry.ts";
+import { claudeSdkOptions } from "./claudeRuntime.ts";
 import { MCP_SERVER_NAME, TurnNormalizer } from "./events.ts";
 import type { ChatHub } from "./hub.ts";
 import { buildSystemPrompt, buildUserPrompt, schemaSummary } from "./prompt.ts";
@@ -97,20 +98,13 @@ export const buildQueryOptions = (args: {
       : { behavior: "deny", message: `Tool ${toolName} is not available in dbchat.` },
   mcpServers: { [MCP_SERVER_NAME]: args.mcpServer },
   strictMcpConfig: true,
-  settingSources: [],
   includePartialMessages: true,
   persistSession: true,
   maxTurns: 25,
-  env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "dbchat/0.1.0" },
-  ...claudeCliOption(),
+  // settingSources + env + binary: see claudeRuntime.ts (user settings.json, login-shell env, chosen `claude`).
+  ...claudeSdkOptions("dbchat/0.1.0"),
   ...(args.stderr ? { stderr: args.stderr } : {}),
 });
-
-/** Packaged desktop builds ship the `claude` binary next to the sidecar and point at it via DBCHAT_CLAUDE_CLI. */
-export const claudeCliOption = (): Pick<Options, "pathToClaudeCodeExecutable"> => {
-  const p = process.env.DBCHAT_CLAUDE_CLI?.trim();
-  return p ? { pathToClaudeCodeExecutable: p } : {};
-};
 
 /**
  * Runs the whole turn to completion (intended to be forked). Publishes every

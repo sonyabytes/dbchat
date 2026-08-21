@@ -2,7 +2,7 @@
  * Spawns and supervises the Bun server binary.
  *
  * env passed to the child: PORT, HOST=127.0.0.1, DBCHAT_HOME, DBCHAT_ALLOWED_ORIGINS,
- * DBCHAT_CLAUDE_CLI (when the bundled `claude` binary exists). stdout/stderr → <logs>/server.log.
+ * DBCHAT_CLAUDE_CLI (bundled `claude`, used only as a fallback — see server/agent/claudeRuntime.ts). stdout/stderr → <logs>/server.log.
  * Crash policy: restart up to MAX_RESTARTS times within the app lifetime, then give up (onFatal).
  */
 import { type ChildProcess, spawn } from "node:child_process";

@@ -41,3 +41,29 @@ export const ProviderModels = Schema.Struct({
   models: Schema.Array(ModelInfo),
 });
 export type ProviderModels = typeof ProviderModels.Type;
+
+/* ---------------- Claude runtime (which `claude` instance the agent uses) ---------------- */
+
+/** Persisted in `<DBCHAT_HOME>/claude.json`. Empty string = unset (fall back to env / PATH / default). */
+export const ClaudeRuntimeSettings = Schema.Struct({
+  /** Path or command name of the Claude Code binary. */
+  binaryPath: Schema.String,
+  /** `CLAUDE_CONFIG_DIR` — a separate login/profile. `HOME` is never overridden. */
+  configDir: Schema.String,
+});
+export type ClaudeRuntimeSettings = typeof ClaudeRuntimeSettings.Type;
+
+export const ClaudeRuntimeStatus = Schema.Struct({
+  binaryPath: Schema.NullOr(Schema.String),
+  binarySource: Schema.Literals(["settings", "env", "path", "bundled"]),
+  configDir: Schema.String,
+  configDirSource: Schema.Literals(["settings", "env", "default"]),
+  configDirExists: Schema.Boolean,
+  /** `null` = could not determine (no binary / probe failed). */
+  loggedIn: Schema.NullOr(Schema.Boolean),
+  authMethod: Schema.optional(Schema.String),
+  apiProvider: Schema.optional(Schema.String),
+  email: Schema.optional(Schema.String),
+  detail: Schema.String,
+});
+export type ClaudeRuntimeStatus = typeof ClaudeRuntimeStatus.Type;
