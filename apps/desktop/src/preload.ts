@@ -11,6 +11,17 @@ contextBridge.exposeInMainWorld("dbchat", {
   isElectron: true,
   canCheckForUpdates,
   checkForUpdates: () => ipcRenderer.invoke("dbchat:check-for-updates") as Promise<void>,
+  updater: {
+    getState: () => ipcRenderer.invoke("dbchat:update:state"),
+    check: () => ipcRenderer.invoke("dbchat:update:check") as Promise<void>,
+    download: () => ipcRenderer.invoke("dbchat:update:download") as Promise<void>,
+    install: () => ipcRenderer.invoke("dbchat:update:install") as Promise<void>,
+    onChange: (cb: (state: unknown) => void) => {
+      const handler = (_e: unknown, state: unknown) => cb(state);
+      ipcRenderer.on("dbchat:update:changed", handler);
+      return () => { ipcRenderer.removeListener("dbchat:update:changed", handler); };
+    },
+  },
 });
 
 const tag = () => {

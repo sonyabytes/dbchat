@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Download, Loader2, MessageSquare, Moon, PanelRight, Plus, RefreshCw, Search, Settings, Sun, Table2, TerminalSquare, X } from "lucide-react";
+import { AlertCircle, ArrowDownCircle, ArrowLeft, Download, Loader2, RotateCw, MessageSquare, Moon, PanelRight, Plus, RefreshCw, Search, Settings, Sun, Table2, TerminalSquare, X } from "lucide-react";
 import type { ConnectionId } from "@dbchat/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,27 +26,75 @@ import { ThreadList } from "@/components/chat/thread-list";
 import { ChatView } from "@/components/screens/chat";
 
 /* ---------------- Sidebar: schema explorer + threads ---------------- */
-function CheckForUpdatesButton() {
-  const [checking, setChecking] = useState(false);
-  const desktop = window.dbchat;
-  if (!desktop?.canCheckForUpdates) return null;
+function useUpdateState() {
+  const api = window.dbchat?.updater;
+  const [state, setState] = useState<DbchatUpdateState | undefined>();
+  useEffect(() => {
+    if (!api) return;
+    void api.getState().then((s) => { if (s) setState(s); });
+    return api.onChange(setState);
+  }, [api]);
+  return state;
+}
 
-  const check = async () => {
-    setChecking(true);
-    try {
-      await desktop.checkForUpdates();
-    } catch (error) {
-      console.error("Could not open the update checker", error);
-    } finally {
-      setChecking(false);
-    }
+/** Single footer icon: check → update available (hover = version diff + notes) → downloading → restart to install. */
+function UpdateIcon() {
+  const desktop = window.dbchat;
+  const state = useUpdateState();
+  const api = desktop?.updater;
+  if (!desktop?.canCheckForUpdates || !api) return null;
+
+  const status = state?.status ?? "idle";
+  const latest = state?.latest;
+  const pct = Math.round((state?.progress ?? 0) * 100);
+
+  const onClick = () => {
+    if (status === "available") void api.download();
+    else if (status === "ready") void api.install();
+    else if (status === "idle" || status === "error") void api.check();
   };
 
+  const icon =
+    status === "checking" ? <Loader2 className="animate-spin" /> :
+    status === "downloading" ? <Loader2 className="animate-spin text-brand" /> :
+    status === "ready" ? <RotateCw className="text-brand" /> :
+    status === "available" ? <ArrowDownCircle className="text-brand" /> :
+    status === "error" ? <AlertCircle className="text-destructive" /> :
+    <Download />;
+
+  const label =
+    status === "checking" ? "Checking for updates…" :
+    status === "downloading" ? `Downloading ${latest?.version ?? "update"} · ${pct}%` :
+    status === "ready" ? `Restart to install ${latest?.version}` :
+    status === "available" ? `Update to ${latest?.version}` :
+    status === "error" ? "Update check failed · retry" :
+    "Check for updates";
+
+  const busy = status === "checking" || status === "downloading";
+  const notes = latest?.notes.trim().split("\n").filter(Boolean).slice(0, 6) ?? [];
+
   return (
-    <Button variant="outline" onClick={() => void check()} disabled={checking} aria-live="polite" className="mb-1 w-full justify-start">
-      {checking ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Download data-icon="inline-start" />}
-      {checking ? "Checking…" : "Check for updates"}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={label} aria-live="polite" onClick={onClick} disabled={busy} className="relative" />}>
+        {icon}
+        {(status === "available" || status === "ready") && <span aria-hidden className="absolute right-1 top-1 size-1.5 rounded-full bg-brand" />}
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-72">
+        {status === "available" || status === "ready" || status === "downloading" ? (
+          <div className="space-y-1">
+            <div className="font-mono text-[11px]">{state?.current} → {latest?.version}</div>
+            <div className="text-[11px] font-medium">{label}</div>
+            {notes.length > 0 && (
+              <ul className="space-y-0.5 border-t border-line/40 pt-1 text-[10.5px] leading-snug opacity-80">
+                {notes.map((n, i) => <li key={i} className="truncate">{n.replace(/^[-*#]+\s*/, "")}</li>)}
+              </ul>
+            )}
+          </div>
+        ) : status === "error" ? (
+          <div><div>{label}</div><div className="text-[10.5px] opacity-80">{state?.error}</div></div>
+        ) : label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -115,7 +163,6 @@ function Sidebar() {
       </div>
 
       <div className="border-t border-line p-2">
-        <CheckForUpdatesButton />
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Command palette" onClick={() => openPalette(true)} />}><Search /></TooltipTrigger>
@@ -125,6 +172,7 @@ function Sidebar() {
             <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Settings" onClick={() => void navigate({ to: "/settings" })} />}><Settings /></TooltipTrigger>
             <TooltipContent>Settings · ⌘,</TooltipContent>
           </Tooltip>
+          <UpdateIcon />
           <Button variant="ghost" size="icon-sm" aria-label="Toggle theme" onClick={toggleTheme} className="ml-auto">{dark ? <Sun /> : <Moon />}</Button>
         </div>
       </div>

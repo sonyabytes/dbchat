@@ -143,16 +143,24 @@ describe("Updater.check", () => {
     expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
   });
 
-  test.skipIf(!packaged)("newer release: 'Later' persists the skipped version; next background check honours it", async () => {
+  test.skipIf(!packaged)("newer release: background check exposes 'available' state without prompting", async () => {
     fakePackaged();
     globalThis.fetch = mock(async () => Response.json(release("1.3.0"))) as unknown as typeof fetch;
-    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 2 });
-    await make().check({ interactive: false });
-    expect(JSON.parse(readFileSync(stateFile, "utf8")).skipped).toBe("1.3.0");
+    const u = make();
+    const seen: string[] = [];
+    u.onChange((st) => seen.push(st.status));
+    await u.check({ interactive: false });
+    expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
+    expect(seen).toEqual(["checking", "available"]);
+    expect(u.getState().latest).toMatchObject({ version: "1.3.0", url: "https://rel" });
+  });
 
-    await make().check({ interactive: false });
-    expect(electron.dialog.showMessageBox).toHaveBeenCalledTimes(1);
-    expect(logs.some((l) => l.includes("skipping 1.3.0"))).toBe(true);
+  test.skipIf(!packaged)("install is a no-op until a download is ready", () => {
+    fakePackaged();
+    let quit = 0;
+    const u = new Updater({ repo: "x/y", stateFile, quit: () => { quit++; } });
+    u.install();
+    expect(quit).toBe(0);
   });
 
   test.skipIf(!packaged)("'Release Notes' opens the browser and does not download", async () => {
