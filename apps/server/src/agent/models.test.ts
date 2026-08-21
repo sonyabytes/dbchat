@@ -84,9 +84,16 @@ describe("resolveModel", () => {
   });
 
   test("a model belonging to an unavailable provider is rejected", () => {
-    const result = resolveModel({ requested: "gpt-5.3-codex", defaultModel });
+    const catalog = buildCatalog(defaultModel, { openai: { binary: undefined }, opencode: { binary: undefined } });
+    const result = resolveModel({ requested: "gpt-5.3-codex", defaultModel, catalog });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("unavailable");
+  });
+
+  test("a model belonging to an installed CLI provider is accepted", () => {
+    const catalog = buildCatalog(defaultModel, { openai: { binary: "/bin/codex" }, opencode: { binary: "/bin/opencode" } });
+    expect(resolveModel({ requested: "gpt-5.3-codex", defaultModel, catalog })).toEqual({ ok: true, model: "gpt-5.3-codex" });
+    expect(resolveModel({ requested: "opencode/big-pickle", defaultModel, catalog })).toEqual({ ok: true, model: "opencode/big-pickle" });
   });
 
   test("a thread pinned to a model we no longer ship quietly falls back", () => {

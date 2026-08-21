@@ -10,6 +10,7 @@ import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
 
 import { isOriginAllowed, ServerConfig, ServerConfigLive } from "./config.ts";
+import { handleMcpRequest } from "./agent/mcpBridge.ts";
 import { AgentServiceLive } from "./Layers/AgentServiceLive.ts";
 import { ConnectionStoreLive } from "./Layers/ConnectionStoreLive.ts";
 import { DriverRegistryLive } from "./Layers/DriverRegistryLive.ts";
@@ -37,6 +38,19 @@ const HealthRoute = HttpRouter.add(
     const { version } = yield* ServerConfig;
     return HttpServerResponse.jsonUnsafe({ ok: true, version });
   }),
+);
+
+/** Turn-scoped MCP bridge used by the OpenCode driver; bearer tokens expire with the turn. */
+const AgentMcpRoute = HttpRouter.add(
+  "POST",
+  "/agent/mcp",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* request.json;
+    const response = yield* Effect.promise(() => handleMcpRequest(request.headers.authorization, body));
+    if (response.body === undefined) return HttpServerResponse.empty({ status: response.status });
+    return HttpServerResponse.jsonUnsafe(response.body, { status: response.status });
+  }).pipe(Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "Invalid JSON body" }, { status: 400 })))),
 );
 
 const RpcRoute = HttpRouter.use((router) =>
@@ -69,7 +83,7 @@ const CorsLayer = Layer.unwrap(
   }),
 );
 
-const RoutesLive = Layer.mergeAll(HealthRoute, RpcRoute, CorsLayer);
+const RoutesLive = Layer.mergeAll(HealthRoute, AgentMcpRoute, RpcRoute, CorsLayer);
 
 const HttpLive = Layer.unwrap(
   Effect.gen(function* () {

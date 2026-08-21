@@ -1,16 +1,16 @@
 /**
  * Model catalog for the chat agent.
  *
- * Static on purpose: the Claude Agent SDK accepts a plain model string (see
- * `Options.model` in sdk.d.ts — aliases or full ids), so there is nothing to
- * introspect without opening a session. All three ids below were verified with
- * a one-turn `query()` against the user's Claude Code login.
+ * Static on purpose: the provider runtimes accept model ids but do not expose
+ * one portable, authentication-free discovery API. Runtime availability is
+ * detected separately from this curated catalog.
  *
  * `DBCHAT_MODEL` picks which entry carries the `default: true` marker; the
  * picker in the web UI falls back to it when neither the thread nor the user
  * has chosen a model.
  */
 import type { ModelInfo, ProviderModels } from "@dbchat/contracts";
+import { cliAvailability } from "./cliRuntime.ts";
 
 /** Fallback when `DBCHAT_MODEL` is unset. */
 export const DEFAULT_MODEL = "claude-sonnet-5";
@@ -65,7 +65,15 @@ export const resolveDefaultModel = (env: Record<string, string | undefined> = pr
  * round trip on every page load), so Anthropic is reported `ready` and a broken
  * login surfaces as an `AgentError` on the first turn instead.
  */
-export const buildCatalog = (defaultModel: string = resolveDefaultModel()): ReadonlyArray<ProviderModels> => [
+export interface AgentRuntimeAvailability {
+  readonly openai: { readonly binary: string | undefined };
+  readonly opencode: { readonly binary: string | undefined };
+}
+
+export const buildCatalog = (
+  defaultModel: string = resolveDefaultModel(),
+  availability: AgentRuntimeAvailability = cliAvailability(),
+): ReadonlyArray<ProviderModels> => [
   {
     provider: "anthropic",
     label: ANTHROPIC_PROVIDER_LABEL,
@@ -75,16 +83,16 @@ export const buildCatalog = (defaultModel: string = resolveDefaultModel()): Read
   {
     provider: "openai",
     label: "Codex",
-    status: "unavailable",
-    reason: "Codex runtime setup is not configured yet",
-    models: CODEX_MODELS,
+    status: availability.openai.binary ? "ready" : "unavailable",
+    ...(!availability.openai.binary ? { reason: "Install and sign in to the Codex CLI, or set DBCHAT_CODEX_CLI" } : {}),
+    models: CODEX_MODELS.map((m) => (m.id === defaultModel ? { ...m, default: true } : m)),
   },
   {
     provider: "opencode",
     label: "OpenCode",
-    status: "unavailable",
-    reason: "OpenCode runtime setup is not configured yet",
-    models: OPENCODE_MODELS,
+    status: availability.opencode.binary ? "ready" : "unavailable",
+    ...(!availability.opencode.binary ? { reason: "Install and configure OpenCode, or set DBCHAT_OPENCODE_CLI" } : {}),
+    models: OPENCODE_MODELS.map((m) => (m.id === defaultModel ? { ...m, default: true } : m)),
   },
 ];
 

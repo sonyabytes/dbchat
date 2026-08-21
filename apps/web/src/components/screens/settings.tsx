@@ -231,7 +231,9 @@ export function SettingsScreen() {
                   </SettingRow>
                   {provider === "anthropic" ? <><Separator /><ClaudeRuntimeSection /></> : (
                     <p className="rounded-md bg-inset p-3 text-xs text-muted-foreground">
-                      {selectedProvider?.reason}. The provider is shown alongside Claude now and will become selectable in the model picker once its runtime is connected.
+                      {selectedProvider?.status === "ready"
+                        ? `${selectedProvider.label} is available through your existing CLI login. Models from this provider are selectable in new and existing chats.`
+                        : `${selectedProvider?.reason ?? "Runtime setup is required"}. It will become selectable once the CLI is available.`}
                     </p>
                   )}
                 </SettingsCard>

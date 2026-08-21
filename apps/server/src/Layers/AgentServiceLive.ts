@@ -1,8 +1,10 @@
 /**
- * AgentService backed by the Claude Agent SDK (user's Claude Code login) with
- * an in-process MCP server for database tools. See src/agent/* for the parts.
+ * AgentService backed by Claude Code, Codex, and OpenCode drivers. All three
+ * share the guarded database tool layer and approval flow in src/agent/*.
  */
 import { AgentError, type ApprovalId, type ChatEvent, type MessageId, NotFound, type ThreadId } from "@dbchat/contracts";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -40,7 +42,12 @@ export const AgentServiceLive = Layer.effect(
 
     const defaultModel = config.model;
     const catalog = buildCatalog(defaultModel);
-    const cwd = config.homeDir;
+    // Give provider runtimes a clean working directory rather than pointing
+    // their default project context at the database and key in homeDir.
+    const cwd = join(config.homeDir, "agent-workspace");
+    mkdirSync(cwd, { recursive: true });
+    const agentHost = config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
+    const serverUrl = `http://${agentHost.includes(":") ? `[${agentHost}]` : agentHost}:${config.port}`;
     const activeTurns = new Map<ThreadId, ActiveTurn>();
     const pendingApprovals = new Map<ApprovalId, PendingApproval>();
     const log = (msg: string, data?: Record<string, unknown>) => Effect.logInfo(msg, data ?? {});
@@ -65,6 +72,7 @@ export const AgentServiceLive = Layer.effect(
       pendingApprovals,
       model,
       cwd,
+      serverUrl,
       log: (m: string, d?: Record<string, unknown>) => log(m, { threadId, ...d }),
     });
 
@@ -87,7 +95,7 @@ export const AgentServiceLive = Layer.effect(
           const messageId = newId("m") as MessageId;
           // Claim the thread synchronously with the busy check (no yield in
           // between), so two concurrent sends cannot both start a turn.
-          const placeholder: ActiveTurn = { messageId, query: { interrupt: async () => undefined } as never };
+          const placeholder: ActiveTurn = { messageId, query: { interrupt: async () => undefined } };
           const claimed = yield* Effect.sync(() => {
             if (activeTurns.has(thread.id)) return false;
             activeTurns.set(thread.id, placeholder);
