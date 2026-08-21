@@ -1,4 +1,4 @@
-import { ArrowUp, AtSign, Paperclip, Slash, Square, X } from "lucide-react";
+import { ArrowUp, AtSign, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -222,12 +222,6 @@ export function PromptBar({
           }}
         >
           <AtSign />
-        </Button>
-        <Button variant="ghost" size="icon-xs" aria-label="Slash command">
-          <Slash />
-        </Button>
-        <Button variant="ghost" size="icon-xs" aria-label="Attach">
-          <Paperclip />
         </Button>
         {!compact && chips.length > 0 && (
           <div className="ml-1 flex min-w-0 items-center gap-1 overflow-hidden border-l border-line pl-2">
