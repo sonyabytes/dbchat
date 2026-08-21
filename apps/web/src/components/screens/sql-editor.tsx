@@ -359,8 +359,11 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
             <Square /> Cancel
           </Button>
         ) : (
-          <Button size="xs" onClick={() => void run()} disabled={!code.trim()}>
-            <Play /> Run <Kbd className="ml-1 bg-primary-foreground/15 text-primary-foreground">⌘↵</Kbd>
+          <Button size="xs" onClick={() => void run()} disabled={!code.trim()} aria-keyshortcuts="Meta+Enter Control+Enter">
+            <Play /> Run
+            <Kbd className="ml-1 h-4 min-w-0 rounded-[3px] bg-primary-foreground/15 px-1.5 text-[9px] leading-none tracking-tight text-primary-foreground/85">
+              ⌘ Enter
+            </Kbd>
           </Button>
         )}
         <Button variant="ghost" size="xs" onClick={() => setSaveOpen(true)} disabled={!code.trim()}>
