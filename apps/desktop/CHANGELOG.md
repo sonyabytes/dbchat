@@ -1,5 +1,11 @@
 # @dbchat/desktop
 
+## 0.1.3
+
+### Patch Changes
+
+- bb7252d: Fix editing saved database connections, including URL-backed connections, credential reuse during connection tests, and switching between URL and field-based configuration.
+
 ## 0.1.2
 
 ### Patch Changes
