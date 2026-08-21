@@ -1,5 +1,11 @@
 # @dbchat/desktop
 
+## 0.2.0
+
+### Patch Changes
+
+- a9d3912: Load saved connection URLs and passwords into the edit form, mask them by default with controls to reveal them, and convert between URLs and individual fields when switching tabs.
+
 ## 0.1.3
 
 ### Patch Changes
