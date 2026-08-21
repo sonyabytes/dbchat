@@ -28,6 +28,8 @@ const isDev = !isPackaged;
 const UPDATE_REPO = process.env.DBCHAT_UPDATE_REPO ?? "sonyabytes/dbchat";
 
 app.setName("dbchat");
+// Renderer heap: a 1.7 MB SPA has no business growing past ~256 MB; a lower ceiling makes V8 GC sooner.
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=256");
 if (SMOKE) app.setPath("userData", mkdtempSync(join(tmpdir(), "dbchat-smoke-")));
 registerAppScheme();
 
