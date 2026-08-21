@@ -37,6 +37,25 @@ function useUpdateState() {
   return state;
 }
 
+/** Turn a raw GitHub release body into clean, human-readable bullet lines. */
+function formatReleaseNotes(body: string | undefined): string[] {
+  if (!body) return [];
+  return body
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^[-*#>\s]+/, "") // leading markdown bullets/headings/quotes
+        .replace(/\s+by\s+@[\w-]+(?:\s+in\s+\S+)?$/i, "") // "by @user in <url>" attribution
+        .replace(/\(?https?:\/\/\S+\)?/g, "") // bare/inline urls
+        .replace(/\*\*/g, "") // stray bold markers
+        .replace(/^\*+|\*+$/g, "") // stray asterisks
+        .replace(/`([^`]+)`/g, "$1") // inline code fences
+        .trim(),
+    )
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^(what'?s changed|full changelog|new contributors?|changelog)\b/i.test(line));
+}
+
 /** Single footer icon: check → update available (hover = version diff + notes) → downloading → restart to install. */
 function UpdateIcon() {
   const desktop = window.dbchat;
@@ -71,7 +90,7 @@ function UpdateIcon() {
     "Check for updates";
 
   const busy = status === "checking" || status === "downloading";
-  const notes = latest?.notes.trim().split("\n").filter(Boolean).slice(0, 6) ?? [];
+  const notes = formatReleaseNotes(latest?.notes).slice(0, 6);
 
   return (
     <Tooltip>
@@ -86,7 +105,7 @@ function UpdateIcon() {
             <div className="text-[11px] font-medium">{label}</div>
             {notes.length > 0 && (
               <ul className="space-y-0.5 border-t border-line/40 pt-1 text-[10.5px] leading-snug opacity-80">
-                {notes.map((n, i) => <li key={i} className="truncate">{n.replace(/^[-*#]+\s*/, "")}</li>)}
+                {notes.map((n, i) => <li key={i} className="truncate">{n}</li>)}
               </ul>
             )}
           </div>

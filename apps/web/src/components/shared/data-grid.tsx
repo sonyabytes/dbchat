@@ -48,12 +48,20 @@ function normalizeColumns(columns: ReadonlyArray<GridColumn>): NormalColumn[] {
 }
 
 const ENUM_LIKE = ["paid", "unpaid", "free", "pro", "team", "enterprise", "active", "cancelled", "pending", "failed"];
+const NUMERIC_TYPE = /^(?:bigint|bigserial|decimal|double(?: precision)?|float\d*|int(?:eger)?\d*|mediumint|money|numeric|real|serial\d*|smallint|tinyint)(?:\s|\(|$)/i;
+
+function isNumericType(type: string): boolean {
+  return NUMERIC_TYPE.test(type);
+}
 
 export function CellValue({ v, type }: { v: unknown; type?: string }) {
   if (v === null || v === undefined) return <span className="font-mono text-[11px] italic text-ink-3">NULL</span>;
   if (typeof v === "boolean") return <span className={cn("font-mono text-[11px]", v ? "text-success" : "text-ink-3")}>{String(v)}</span>;
   if (typeof v === "number") return <span className="font-mono tabular-nums">{v.toLocaleString()}</span>;
-  if (typeof v === "object") return <span className="truncate font-mono text-xs text-ink-2">{JSON.stringify(v)}</span>;
+  if (typeof v === "object") {
+    const json = JSON.stringify(v);
+    return <span className="block truncate font-mono text-xs text-ink-2" title={json}>{json}</span>;
+  }
   const s = String(v);
   if (type?.startsWith("timestamp") || type === "date" || type === "datetime") {
     const d = new Date(s);
@@ -67,7 +75,7 @@ export function CellValue({ v, type }: { v: unknown; type?: string }) {
     return <span className="font-mono tabular-nums">{Number(s).toLocaleString()}</span>;
   if (type?.endsWith("enum") || (type === "text" && ENUM_LIKE.includes(s)))
     return <span className="rounded-sm bg-inset px-1.5 py-0.5 font-mono text-[11px]">{s}</span>;
-  return <span className="truncate">{s}</span>;
+  return <span className="block truncate" title={s}>{s}</span>;
 }
 
 export interface DataGridProps {
@@ -110,6 +118,10 @@ export function DataGrid({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const cols = useMemo(() => normalizeColumns(columns), [columns]);
+  const numericColumns = useMemo(
+    () => new Set(cols.filter((column) => isNumericType(column.type)).map((column) => column.name)),
+    [cols],
+  );
 
   const data = useMemo<GridRecord[]>(
     () =>
@@ -177,7 +189,7 @@ export function DataGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  const rowPx = dense ? 28 : 32;
+  const rowPx = dense ? 30 : 34;
   const virtualizer = useVirtualizer({
     count: modelRows.length,
     getScrollElement: () => scrollRef.current,
@@ -214,21 +226,21 @@ export function DataGrid({
     );
 
   const headers = table.getHeaderGroups()[0]?.headers ?? [];
-  const rowH = dense ? "h-7" : "h-8";
+  const rowH = dense ? "h-[30px]" : "h-[34px]";
 
   return (
     <div className={cn("relative flex min-h-0 flex-col", className)}>
       <div ref={scrollRef} className={cn("min-h-0 flex-1 overflow-auto", loading && "opacity-60")}>
         <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
-          <thead className="sticky top-0 z-10 bg-surface">
+          <thead className="sticky top-0 z-10 bg-inset">
             <tr>
-              <th className="sticky left-0 z-20 w-10 border-b border-r border-line bg-surface p-0">
+              <th className="sticky left-0 z-20 w-11 border-b border-r border-line-strong bg-inset p-0">
                 <button
                   type="button"
                   onClick={toggleAll}
                   aria-label="Select all rows on this page"
                   className={cn(
-                    "h-8 w-full font-mono text-[10.5px] text-ink-3 transition-opacity hover:text-ink",
+                    "h-8 w-full font-mono text-[10.5px] text-ink-3 transition-opacity hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40",
                     selected.size > 0 ? "opacity-100" : "opacity-0 hover:opacity-100",
                   )}
                 >
@@ -240,16 +252,26 @@ export function DataGrid({
                 const server = sortFor(name);
                 const dir = manual ? server?.dir : h.column.getIsSorted() || undefined;
                 const order = manual && sort && sort.length > 1 ? sort.findIndex((s) => s.column === name) : -1;
+                const numeric = numericColumns.has(name);
                 return (
-                  <th key={h.id} className="group h-8 whitespace-nowrap border-b border-line px-2.5 text-left font-normal">
+                  <th
+                    key={h.id}
+                    className={cn(
+                      "group h-8 whitespace-nowrap border-b border-r border-line-strong px-3 font-normal last:border-r-0",
+                      numeric ? "text-right" : "text-left",
+                    )}
+                  >
                     <button
                       type="button"
                       onClick={(e) => (manual ? onSortChange?.(name, e.shiftKey) : h.column.getToggleSortingHandler()?.(e))}
                       title={manual ? "Click to sort · shift-click to add" : undefined}
-                      className="flex w-full items-center gap-2 text-ink"
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
+                        numeric && "justify-end",
+                      )}
                     >
                       {flexRender(h.column.columnDef.header, h.getContext())}
-                      <span className="ml-auto flex items-center gap-0.5 text-ink-3">
+                      <span className={cn("flex items-center gap-0.5 text-ink-3", !numeric && "ml-auto")}>
                         {order >= 0 && <span className="font-mono text-[9px] text-brand">{order + 1}</span>}
                         {dir === "asc" ? <ArrowUp className="size-3 text-brand" />
                           : dir === "desc" ? <ArrowDown className="size-3 text-brand" />
@@ -266,29 +288,37 @@ export function DataGrid({
             {virtualRows.map((v) => {
               const r = modelRows[v.index]!;
               const sel = selected.has(r.index);
+              const striped = v.index % 2 === 1;
               const menu = rowContextMenu?.({ row: r.original, index: r.index });
               const cells = (
                 <>
-                  <td className={cn("sticky left-0 z-10 border-b border-r border-line px-0 text-center", sel ? "bg-brand-tint" : "bg-surface group-hover:bg-hover")}>
+                  <td
+                    className={cn(
+                      "sticky left-0 z-10 border-b border-r border-line px-0 text-center",
+                      sel ? "bg-brand-tint" : striped ? "bg-inset group-hover:bg-hover" : "bg-surface group-hover:bg-hover",
+                    )}
+                  >
                     <span className="font-mono text-[10.5px] tabular-nums text-ink-3">
                       {sel ? "✓" : rowOffset + r.index + 1}
                     </span>
                   </td>
                   {r.getVisibleCells().map((c) => (
-                    <td key={c.id} className="max-w-[280px] truncate whitespace-nowrap border-b border-line px-2.5">
+                    <td
+                      key={c.id}
+                      className={cn(
+                        "max-w-[320px] whitespace-nowrap border-b border-r border-line px-3 last:border-r-0",
+                        numericColumns.has(c.column.id) && "text-right",
+                      )}
+                    >
                       {flexRender(c.column.columnDef.cell, c.getContext())}
                     </td>
                   ))}
                 </>
               );
+              const rowCls = cn("group cursor-default", rowH, sel ? "bg-brand-tint" : striped ? "bg-inset hover:bg-hover" : "bg-surface hover:bg-hover");
               if (!menu) {
                 return (
-                  <tr
-                    key={r.id}
-                    aria-selected={sel}
-                    className={cn("group cursor-default", rowH, sel ? "bg-brand-tint" : "hover:bg-hover")}
-                    onClick={(e) => selectRange(r.index, e.shiftKey)}
-                  >
+                  <tr key={r.id} aria-selected={sel} className={rowCls} onClick={(e) => selectRange(r.index, e.shiftKey)}>
                     {cells}
                   </tr>
                 );
@@ -305,7 +335,7 @@ export function DataGrid({
                 >
                   <ContextMenuTrigger
                     render={<tr aria-selected={sel} />}
-                    className={cn("group cursor-default select-text", rowH, sel ? "bg-brand-tint" : "hover:bg-hover")}
+                    className={cn(rowCls, "select-text")}
                     onClick={(e) => selectRange(r.index, e.shiftKey)}
                   >
                     {cells}
@@ -323,7 +353,7 @@ export function DataGrid({
       </div>
 
       {footer ?? (
-        <div className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-surface px-3 font-mono text-[11px] text-ink-2">
+        <div className="flex h-8 shrink-0 items-center gap-3 border-t border-line-strong bg-inset/70 px-3 font-mono text-[11px] text-ink-2">
           <span>{table.getFilteredRowModel().rows.length.toLocaleString()} rows</span>
           {selected.size > 0 && <span className="text-brand-ink">{selected.size} selected</span>}
           <span className="ml-auto">page {table.getState().pagination.pageIndex + 1} / {Math.max(1, table.getPageCount())}</span>

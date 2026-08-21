@@ -31,8 +31,10 @@ export function ResultGrid({
   return (
     <>
       <div className="overflow-hidden rounded-md bg-surface shadow-hairline">
-        <div className="flex h-7 items-center gap-2 border-b border-line px-2.5 text-[11px] text-ink-3">
-          <Table2 className="size-3" /> {rows.length.toLocaleString()} {rows.length === 1 ? "row" : "rows"}
+        <div className="flex h-8 items-center gap-2 border-b border-line-strong bg-inset/70 px-3 text-[11px] text-ink-3">
+          <Table2 className="size-3" />
+          <span className="font-medium text-ink-2">Query result</span>
+          <span>· {rows.length.toLocaleString()} {rows.length === 1 ? "row" : "rows"}</span>
           <div className="ml-auto flex items-center gap-0.5">
             {sql && onOpenInEditor && (
               <Button variant="ghost" size="icon-xs" aria-label="Open in editor" onClick={() => onOpenInEditor(sql)}>
