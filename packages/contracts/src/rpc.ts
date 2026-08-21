@@ -84,7 +84,7 @@ export class DbchatRpcs extends RpcGroup.make(
   }),
   Rpc.make(RPC.connectionDelete, { payload: ById, error: NotFound }),
   Rpc.make(RPC.connectionTest, {
-    payload: ConnectionInput,
+    payload: Schema.Struct({ id: Schema.optional(ConnectionId), input: ConnectionInput }),
     success: ConnectionTestResult,
     error: Schema.Union([ValidationError, ConnectionError, DriverError]),
   }),

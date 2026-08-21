@@ -88,7 +88,7 @@ const program = Effect.gen(function* () {
   console.log(yield* client[RPC.serverHealth]());
 
   step("connection.test");
-  const test = yield* client[RPC.connectionTest](plan.input);
+  const test = yield* client[RPC.connectionTest]({ input: plan.input });
   console.log(test);
   if (!test.ok) return yield* Effect.die(new Error(`connection.test failed: ${test.error ?? "unknown"}`));
 
