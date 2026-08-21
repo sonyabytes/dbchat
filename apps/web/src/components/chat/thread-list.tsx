@@ -59,7 +59,7 @@ export function ThreadList({ showNewChat = true }: { showNewChat?: boolean }) {
       ) : null}
 
       {isLoading ? <div className="px-2 py-1 text-xs text-ink-3">Loading…</div> : null}
-      {!isLoading && threads?.length === 0 ? <div className="px-2 py-1 text-xs text-ink-3">No conversations yet.</div> : null}
+      {!isLoading && threads?.length === 0 ? <div className="px-2 py-1 text-xs text-ink-3">No work items yet.</div> : null}
 
       {threads?.map((thread) => {
         const live = streamingThreads[thread.id]?.streaming ?? false;

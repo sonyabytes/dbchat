@@ -63,7 +63,7 @@ export function HomeWorkspace({ children }: { children: React.ReactNode }) {
               onChange={(event) => sidebarSection === "databases" && setDatabaseFilter(event.target.value)}
               onClick={() => sidebarSection === "chats" && openPalette(true)}
               readOnly={sidebarSection === "chats"}
-              placeholder={sidebarSection === "chats" ? "Search conversations" : "Find table or column"}
+              placeholder={sidebarSection === "chats" ? "Search work items" : "Find table or column"}
               className="h-7 bg-field pl-7 pr-9 text-xs"
             />
             {sidebarSection === "chats" ? (
@@ -76,8 +76,8 @@ export function HomeWorkspace({ children }: { children: React.ReactNode }) {
             const next = value[0];
             if (next === "chats" || next === "databases") setSidebarSection(next);
           }} size="sm" spacing={1}>
-            <ToggleGroupItem value="chats" aria-label="Show conversations">
-              <MessageSquare data-icon="inline-start" /> Chats
+            <ToggleGroupItem value="chats" aria-label="Show work items">
+              <MessageSquare data-icon="inline-start" /> Work items
             </ToggleGroupItem>
             <ToggleGroupItem value="databases" aria-label="Show all databases">
               <Database data-icon="inline-start" /> Databases

@@ -35,7 +35,7 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
   const { attach, detach, load, send, retry, abort, clearError, resolveApproval, setCurrentThread, setModel } = useChat.getState();
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [contextOff, setContextOff] = useState(false);
+  const [dismissedContextKey, setDismissedContextKey] = useState<string | null>(null);
 
   const { data: threads = [] } = useQuery(threadListQuery);
   const { data: connections = [] } = useQuery(connectionListQuery);
@@ -78,8 +78,10 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
   const autoTableContext = useSettings((state) => state.autoTableContext);
   const contextTable = search.context ?? (autoTableContext && compact && params.schema && params.table ? `${params.schema}.${params.table}` : undefined);
   const contextSql = search.sql;
-  const contextLabel = contextOff ? null : (contextTable ?? (contextSql ? "editor query" : null));
-  const context: ChatContext | undefined = contextOff ? undefined : contextTable ? { table: contextTable } : contextSql ? { sql: contextSql } : undefined;
+  const contextKey = contextTable ? `table:${contextTable}` : contextSql ? `sql:${contextSql}` : null;
+  const contextDismissed = contextKey !== null && contextKey === dismissedContextKey;
+  const contextLabel = contextDismissed ? null : (contextTable ?? (contextSql ? "editor query" : null));
+  const context: ChatContext | undefined = contextDismissed ? undefined : contextTable ? { table: contextTable } : contextSql ? { sql: contextSql } : undefined;
 
   const openInEditor = (sql: string) => {
     if (!primaryConnectionId) return;
@@ -121,7 +123,9 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
     onStop: () => abort(threadId),
     onSend: (text: string) => void doSend(text),
     disabled: creating,
-    context: contextLabel ? { label: contextLabel, onRemove: () => setContextOff(true) } : null,
+    context: contextLabel && contextKey
+      ? { label: contextLabel, onRemove: () => setDismissedContextKey(contextKey) }
+      : null,
     ...(selectedModel ? { model: selectedModel.id, modelLabel: selectedModel.label } : {}),
     onModelChange: (id: string) => setModel(threadId, id),
   };
