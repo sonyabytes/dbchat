@@ -9,6 +9,7 @@ import type { Driver, QueryOptions, RowBatch } from "../Services/DriverRegistry.
 import { makeChatHub } from "./hub.ts";
 import type { ChatRepoShape } from "./repo.ts";
 import { type PendingApproval, proposeWrite, type SessionDeps } from "./session.ts";
+import { collectQuery } from "./tools.ts";
 
 const thread: Thread = { id: "t1" as ThreadId, connectionId: "c1" as never, title: "x", createdAt: "", updatedAt: "" };
 const messageId = "m1" as MessageId;
@@ -38,7 +39,7 @@ const makeMockRepo = (statuses: Array<[ApprovalId, string, unknown]>): ChatRepoS
       Effect.sync(() => void statuses.push([id, status, detail])),
   }) as unknown as ChatRepoShape;
 
-const setup = (batch?: RowBatch) =>
+const setup = (batch?: RowBatch, approvalRequired = true) =>
   Effect.gen(function* () {
   const hub = yield* makeChatHub;
   const calls: Array<{ sql: string; options: QueryOptions | undefined }> = [];
@@ -48,6 +49,13 @@ const setup = (batch?: RowBatch) =>
     repo: makeMockRepo(statuses),
     hub,
     acquireDriver: Effect.succeed(batch === undefined ? makeMockDriver(calls) : makeMockDriver(calls, batch)),
+    writeApprovalRequired: Effect.succeed(approvalRequired),
+    executeWrite: ({ sql }) =>
+      collectQuery(batch === undefined ? makeMockDriver(calls) : makeMockDriver(calls, batch), sql, {
+        readOnly: false,
+        limit: 1,
+        timeoutMs: 30_000,
+      }),
     pendingApprovals,
     model: "test",
     cwd: "/tmp",
@@ -66,6 +74,29 @@ const waitForPending = (pending: Map<ApprovalId, PendingApproval>) =>
   });
 
 describe("propose_write approval flow", () => {
+  test("executes without an approval only when the connection policy allows it", async () => {
+    const out = await Effect.runPromise(
+      Effect.gen(function* () {
+        const s = yield* setup({ columns: [], rows: [], affectedRows: 2 }, false);
+        const outcome = yield* proposeWrite({
+          deps: s.deps,
+          thread,
+          messageId,
+          sql: "update t set a = 1",
+          estimatedRows: 2,
+          emit: s.emit,
+        });
+        return { outcome, s };
+      }),
+    );
+    expect(out.outcome).toEqual({ status: "executed", rowCount: 2 });
+    expect(out.s.calls).toHaveLength(1);
+    expect(out.s.calls[0]!.options?.readOnly).toBe(false);
+    expect(out.s.pendingApprovals.size).toBe(0);
+    expect(out.s.events).toEqual([]);
+    expect(out.s.statuses).toEqual([]);
+  });
+
   test("waits for approval, then executes with readOnly:false and emits executed", async () => {
     const out = await Effect.runPromise(
       Effect.gen(function* () {

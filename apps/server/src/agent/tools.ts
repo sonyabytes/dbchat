@@ -208,7 +208,7 @@ export const makeDbchatMcpServer = (ctx: ToolContext) => {
       ),
       tool(
         "propose_write",
-        "Propose a data-changing statement (INSERT/UPDATE/DELETE/DDL). The user must approve it in the UI before it runs; this call blocks until they decide (up to 10 minutes). Returns the row count on success or a rejection notice.",
+        "Submit one data-changing statement (INSERT/UPDATE/DELETE/DDL). It runs only when the connection policy permits AI writes or after the user approves it in the UI; approval waits up to 10 minutes. Returns the row count on success or a rejection notice.",
         {
           sql: z.string().describe("Exact statement to run. One statement; it runs inside a transaction."),
           rationale: z.string().describe("One or two sentences: what this changes and why."),

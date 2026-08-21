@@ -24,10 +24,10 @@ import { MCP_SERVER_NAME, TurnNormalizer } from "./events.ts";
 import type { ChatHub } from "./hub.ts";
 import { buildSystemPrompt, buildUserPrompt, schemaSummary } from "./prompt.ts";
 import { type ChatRepoShape, newId } from "./repo.ts";
-import { collectQuery, makeDbchatMcpServer, type ProposeWriteOutcome } from "./tools.ts";
+import { makeDbchatMcpServer, type ProposeWriteOutcome } from "./tools.ts";
+import type { AiWriteRequest, AiWriteResult } from "./writeGate.ts";
 
 export const APPROVAL_TIMEOUT = Duration.minutes(10);
-export const WRITE_TIMEOUT_MS = 30_000;
 
 export const TOOL_NAMES = ["list_schemas", "describe_table", "sample_rows", "run_sql", "explain", "propose_write"] as const;
 export const MCP_TOOL_NAMES = TOOL_NAMES.map((t) => `mcp__${MCP_SERVER_NAME}__${t}`);
@@ -41,6 +41,10 @@ export interface SessionDeps {
   readonly repo: ChatRepoShape;
   readonly hub: ChatHub;
   readonly acquireDriver: Effect.Effect<Driver, unknown>;
+  /** Fresh connection policy; true means a persisted approval is required. */
+  readonly writeApprovalRequired: Effect.Effect<boolean>;
+  /** Server-owned capability; the only AI path that may set driver readOnly:false. */
+  readonly executeWrite: (request: AiWriteRequest) => Effect.Effect<AiWriteResult, unknown>;
   readonly pendingApprovals: Map<ApprovalId, PendingApproval>;
   readonly model: string;
   readonly cwd: string;
@@ -231,7 +235,7 @@ export const runTurn = (args: {
     }
   });
 
-/** propose_write: persist → ApprovalRequested → wait (≤10 min) → execute or reject. */
+/** propose_write: enforce connection policy, then execute directly or wait for approval. */
 export const proposeWrite = (args: {
   deps: SessionDeps;
   thread: Thread;
@@ -242,6 +246,21 @@ export const proposeWrite = (args: {
 }): Effect.Effect<ProposeWriteOutcome> =>
   Effect.gen(function* () {
     const { deps, thread, messageId, sql, emit } = args;
+    const approvalRequired = yield* deps.writeApprovalRequired;
+
+    // The connection policy is re-checked by executeWrite immediately before
+    // reaching the raw driver. This first check only decides whether to show an
+    // approval card.
+    if (!approvalRequired) {
+      const direct = yield* Effect.result(deps.executeWrite({ threadId: thread.id, sql }));
+      if (direct._tag === "Failure") {
+        const error = direct.failure instanceof Error ? direct.failure.message : String(direct.failure);
+        return { status: "failed", error } as const;
+      }
+      const rowCount = direct.success.affectedRows ?? direct.success.rows.length;
+      return { status: "executed", rowCount } as const;
+    }
+
     const approvalId = newId("ap") as ApprovalId;
     const decision = yield* Deferred.make<boolean>();
     deps.pendingApprovals.set(approvalId, { threadId: thread.id, decision });
@@ -276,9 +295,7 @@ export const proposeWrite = (args: {
     yield* emit({ _tag: "ApprovalResolved", approvalId, status: "approved" });
 
     const result = yield* Effect.result(
-      deps.acquireDriver.pipe(
-        Effect.flatMap((driver) => collectQuery(driver, sql, { readOnly: false, limit: 1, timeoutMs: WRITE_TIMEOUT_MS })),
-      ),
+      deps.executeWrite({ threadId: thread.id, sql, approvalId }),
     );
     if (result._tag === "Failure") {
       const error = result.failure instanceof Error ? result.failure.message : String(result.failure);
