@@ -18,9 +18,13 @@
     "lint": "oxlint",
     "dev:desktop": "bun scripts/dev-desktop.ts",
     "build:sidecar": "bun apps/server/scripts/build-sidecar.ts",
-    "dist:desktop": "bun scripts/dist-desktop.ts"
+    "dist:desktop": "bun scripts/dist-desktop.ts",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "bun scripts/tag-release.ts"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.1",
     "@types/bun": "^1.3.14",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2"
