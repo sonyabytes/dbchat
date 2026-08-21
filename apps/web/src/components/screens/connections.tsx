@@ -39,7 +39,7 @@ function ConnectionRow({
   return (
     <div className="group rounded-md transition-colors hover:bg-hover">
       <div className="flex w-full items-center gap-3 px-3 py-2.5">
-        <button type="button" onClick={onOpen} disabled={connecting} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <button type="button" onClick={onOpen} disabled={connecting} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left disabled:cursor-default">
           <span className="size-2 shrink-0 rounded-full" style={{ background: c.color }} />
           <DialectIcon dialect={c.dialect} />
           <span className="min-w-0 flex-1">
@@ -49,14 +49,14 @@ function ConnectionRow({
             </span>
             <span className="block truncate font-mono text-[11.5px] text-ink-3">{target(c)}</span>
           </span>
-        </button>
-        <div className="flex items-center gap-2 text-[11.5px] text-ink-3">
-          {connecting ? <Loader2 className="size-3 animate-spin text-brand" /> : <StatusDot status={status.state as "connected" | "idle" | "error"} />}
-          <span className="w-16 text-right">
-            {connecting ? "connecting" : status.state === "connected" && status.latencyMs !== undefined ? `${Math.round(status.latencyMs)}ms` : relativeTime(c.lastUsedAt)}
+          <span className="flex shrink-0 items-center gap-2 text-[11.5px] text-ink-3">
+            {connecting ? <Loader2 className="size-3 animate-spin text-brand" /> : <StatusDot status={status.state as "connected" | "idle" | "error"} />}
+            <span className="w-16 text-right">
+              {connecting ? "connecting" : status.state === "connected" && status.latencyMs !== undefined ? `${Math.round(status.latencyMs)}ms` : relativeTime(c.lastUsedAt)}
+            </span>
           </span>
-        </div>
-        <span className="hidden text-xs text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 sm:inline">Open →</span>
+          <span className="hidden shrink-0 text-xs text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 sm:inline">Open →</span>
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`Actions for ${c.name}`} />}>
             <MoreHorizontal />
