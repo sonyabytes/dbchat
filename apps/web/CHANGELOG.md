@@ -1,5 +1,13 @@
 # @dbchat/web
 
+## 0.4.2
+
+### Patch Changes
+
+- eccf911: Clean up the update tooltip's release notes: strip the "What's Changed" / "Full Changelog" boilerplate, `by @user in <url>` attribution, bare URLs, and stray markdown so the notes read as plain, human-readable bullets.
+- a7af312: Improve the SQL Run button's keyboard shortcut label and spacing.
+- @dbchat/contracts@0.4.2
+
 ## 0.4.1
 
 ### Patch Changes
