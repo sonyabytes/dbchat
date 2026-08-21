@@ -2,8 +2,8 @@
  * sqlite-backed ConnectionStore.
  *
  * Metadata lives in `connections`; passwords / URLs live encrypted in
- * `connection_secrets` (see `db/secrets.ts`). `Connection` values handed back
- * to callers never contain a secret.
+ * `connection_secrets` (see `db/secrets.ts`). Ordinary `Connection` values
+ * never contain a secret; the edit flow requests credentials explicitly.
  */
 import {
   type Connection,

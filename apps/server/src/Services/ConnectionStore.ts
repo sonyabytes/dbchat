@@ -3,7 +3,7 @@ import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
 
-/** Resolved secret for a connection: password and/or URL (never sent to the client). */
+/** Resolved secret for a connection: password and/or URL, kept out of ordinary connection responses. */
 export interface ConnectionSecret {
   readonly password?: string;
   readonly url?: string;

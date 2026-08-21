@@ -27,6 +27,13 @@ export const Connection = Schema.Struct({
 });
 export type Connection = typeof Connection.Type;
 
+/** Credentials returned only for the local edit form; never included in connection lists. */
+export const ConnectionCredentials = Schema.Struct({
+  password: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+});
+export type ConnectionCredentials = typeof ConnectionCredentials.Type;
+
 /** Input for create/update/test. Either fill the fields or pass a `url`. */
 export const ConnectionInput = Schema.Struct({
   name: Schema.String,

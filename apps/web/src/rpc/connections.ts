@@ -26,6 +26,7 @@ export const connectionConnectQuery = (id: ConnectionId) =>
   });
 
 export const connectionApi = {
+  credentials: (id: ConnectionId) => callRpc((c) => c[RPC.connectionCredentials]({ id })),
   create: (input: ConnectionInput) => callRpc((c) => c[RPC.connectionCreate](input)),
   update: (id: ConnectionId, input: ConnectionInput) => callRpc((c) => c[RPC.connectionUpdate]({ id, input })),
   remove: (id: ConnectionId) => callRpc((c) => c[RPC.connectionDelete]({ id })),
