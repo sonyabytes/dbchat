@@ -23,6 +23,7 @@ export const paths = {
   home: () => join(app.getPath("userData"), "dbchat"),
   logs: () => join(app.getPath("userData"), "logs"),
   windowState: () => join(app.getPath("userData"), "window-state.json"),
+  updaterState: () => join(app.getPath("userData"), "updater.json"),
 };
 
 export const hasSidecar = () => existsSync(paths.sidecar);
