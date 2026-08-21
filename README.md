@@ -1,6 +1,6 @@
 # dbchat
 
-Chat-centred SQL GUI for **Postgres, MySQL and SQLite**. Ask questions in plain language, browse
+Chat-centred SQL GUI for **Postgres, MySQL, SQLite and Google BigQuery**. Ask questions in plain language, browse
 and sort tables, write SQL with AI suggestions — all against your own databases, locally. The
 assistant can run through your existing **Claude Code, Codex, or OpenCode** login; writes always go through an approval card.
 
@@ -14,7 +14,7 @@ assistant can run through your existing **Claude Code, Codex, or OpenCode** logi
 |---|---|---|
 | [Bun](https://bun.sh) ≥ 1.3 | package manager, server runtime, desktop build | `bun --version` |
 | An agent CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex/cli), or [OpenCode](https://opencode.ai/docs/) | the assistant reuses the CLI's existing login/config | `claude --version`, `codex --version`, or `opencode --version` |
-| A database to point at | Postgres ≥ 12, MySQL ≥ 8, or a SQLite file | optional — SQLite needs nothing running |
+| A database to point at | Postgres ≥ 12, MySQL ≥ 8, a SQLite file, or a BigQuery project | optional — SQLite needs nothing running; BigQuery can use ADC or service-account JSON |
 | macOS 13+ on Apple Silicon | only target the desktop build ships today (web dev mode runs anywhere Bun does) | |
 
 ### Option A — Desktop app (recommended)
@@ -44,7 +44,7 @@ Open http://localhost:5173. Use this for development or on non-mac machines.
 
 ### First run
 
-1. **New connection** → pick Postgres/MySQL/SQLite, fill host/port/db/user/password (or paste a URL) → **Test connection** → **Save & connect**.
+1. **New connection** → pick Postgres/MySQL/SQLite/BigQuery, enter the database details (or BigQuery project and credentials) → **Test connection** → **Save & connect**.
 2. You land in a chat for that database. Try: *"which tables are largest?"* or *"top 10 customers by revenue last month"*.
 3. The sidebar lists schemas/tables — click one to browse; `+` opens a new chat, SQL tab or table; `⌘K` finds anything.
 4. Writes: the assistant never executes `INSERT/UPDATE/DELETE/DDL` itself — it proposes them and you approve in the chat (prod connections also require typing the connection name).
@@ -157,7 +157,7 @@ their last data instead of throwing, and everything refetches when the server co
 
 ### Seed a local database
 
-The drivers are developed against three throwaway local databases:
+The local database drivers are developed against three throwaway databases. BigQuery connections use a Google Cloud project plus either Application Default Credentials or service-account JSON entered in the connection dialog.
 
 ```sh
 # Postgres

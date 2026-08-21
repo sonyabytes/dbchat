@@ -38,7 +38,7 @@ export interface RowBatch {
 
 /** One live database driver (per dialect). Interruption of `query` = cancel. */
 export interface Driver {
-  readonly dialect: "postgres" | "mysql" | "sqlite";
+  readonly dialect: "postgres" | "mysql" | "sqlite" | "bigquery";
   readonly ping: Effect.Effect<{ latencyMs: number; serverVersion?: string }, DriverError>;
   readonly introspect: Effect.Effect<ReadonlyArray<SchemaMeta>, DriverError>;
   readonly describeTable: (schema: string, table: string) => Effect.Effect<TableDetail, DriverError | NotFound>;

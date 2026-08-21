@@ -1,7 +1,7 @@
 /**
  * Create / edit a connection. TanStack Form drives validation, which is
- * dialect-aware: SQLite needs only a file path, Postgres/MySQL accept either a
- * connection URL or discrete fields.
+ * dialect-aware: SQLite needs a file path, BigQuery needs a project, and
+ * Postgres/MySQL accept either a connection URL or discrete fields.
  */
 import { useEffect, useState } from "react";
 import { useForm } from "@tanstack/react-form";
@@ -12,13 +12,16 @@ import type { Connection, ConnectionEnv, ConnectionInput, Dialect, SslMode } fro
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { DialectIcon } from "@/components/shared/primitives";
 import { connectionApi, connectionKeys } from "@/rpc/connections";
 import { rpcErrorMessage } from "@/rpc/queries";
+import { connectionUrlFromFields, fieldsFromConnectionUrl } from "@/lib/connection-url";
 import { cn } from "@/lib/utils";
 
 interface FormValues {
@@ -58,6 +61,15 @@ const fromConnection = (c: Connection): FormValues => {
 function toConnectionInput(v: FormValues): ConnectionInput {
   const base = { name: v.name.trim(), dialect: v.dialect, env: v.env, ssl: v.ssl, readOnlyForAi: v.readOnlyForAi };
   if (v.dialect === "sqlite") return { ...base, database: v.database.trim(), url: "" };
+  if (v.dialect === "bigquery") {
+    return {
+      ...base,
+      database: v.database.trim(),
+      host: v.host.trim(),
+      url: "",
+      ...(v.password.trim() ? { password: v.password.trim() } : {}),
+    };
+  }
   if (v.mode === "url") {
     const url = v.url.trim();
     return { ...base, ...(url ? { url } : v.hasStoredUrl ? {} : { url: "" }) };
@@ -82,6 +94,16 @@ function validate({ value }: { value: FormValues }) {
     if (!value.database.trim()) fields.database = "File path required";
     else if (!value.database.trim().startsWith("/") && !value.database.trim().startsWith("."))
       fields.database = "Use an absolute or ./relative path";
+  } else if (value.dialect === "bigquery") {
+    if (!value.database.trim()) fields.database = "Project ID required";
+    if (value.password.trim()) {
+      try {
+        const credentials = JSON.parse(value.password);
+        if (typeof credentials !== "object" || credentials === null || Array.isArray(credentials)) throw new Error("not an object");
+      } catch {
+        fields.password = "Must be valid JSON";
+      }
+    }
   } else if (value.mode === "url") {
     const u = value.url.trim();
     const scheme = value.dialect === "mysql" ? /^mysql:\/\// : /^postgres(ql)?:\/\//;
@@ -102,6 +124,13 @@ function FieldError({ errors, touched }: { errors: unknown[]; touched: boolean }
   return <span className="text-[11px] text-danger">{String(errors[0])}</span>;
 }
 
+const dialectLabel = (dialect: Dialect): string => {
+  if (dialect === "postgres") return "Postgres";
+  if (dialect === "mysql") return "MySQL";
+  if (dialect === "bigquery") return "BigQuery";
+  return "SQLite";
+};
+
 export function ConnectionFormDialog({
   open, onOpenChange, connection, onSaved,
 }: {
@@ -113,6 +142,8 @@ export function ConnectionFormDialog({
   const queryClient = useQueryClient();
   const editing = Boolean(connection);
   const [showPw, setShowPw] = useState(false);
+  const [showUrl, setShowUrl] = useState(false);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [test, setTest] = useState<{ state: "idle" | "testing" | "ok" | "error"; message?: string }>({ state: "idle" });
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -135,12 +166,60 @@ export function ConnectionFormDialog({
     },
   });
 
+  const switchMode = (mode: "fields" | "url") => {
+    const values = form.state.values;
+    if (mode === values.mode) return;
+    if (mode === "fields") {
+      const parsed = fieldsFromConnectionUrl(values.url, values.dialect);
+      if (parsed) {
+        form.setFieldValue("host", parsed.host);
+        form.setFieldValue("port", parsed.port);
+        form.setFieldValue("database", parsed.database);
+        form.setFieldValue("user", parsed.user);
+        form.setFieldValue("password", parsed.password);
+      }
+    } else {
+      const url = connectionUrlFromFields({
+        host: values.host,
+        port: values.port,
+        database: values.database,
+        user: values.user,
+        password: values.password,
+      }, values.dialect, values.url);
+      form.setFieldValue("url", url);
+      form.setFieldValue("hasStoredUrl", url.length > 0);
+    }
+    form.setFieldValue("mode", mode);
+    setShowUrl(false);
+    setShowPw(false);
+  };
+
   // Re-seed when the dialog is reopened for a different row.
   useEffect(() => {
     if (!open) return;
     form.reset(connection ? fromConnection(connection) : emptyValues());
+    setShowPw(false);
+    setShowUrl(false);
+    setCredentialsLoading(Boolean(connection));
     setTest({ state: "idle" });
     setSaveError(null);
+
+    let cancelled = false;
+    if (connection) {
+      void connectionApi.credentials(connection.id).then((credentials) => {
+        if (cancelled) return;
+        form.setFieldValue("password", credentials.password ?? "");
+        form.setFieldValue("url", credentials.url ?? "");
+        form.setFieldValue("hasStoredUrl", credentials.url !== undefined);
+        if (credentials.url !== undefined) form.setFieldValue("mode", "url");
+      }).catch((error) => {
+        if (!cancelled) setSaveError(`Couldn’t load saved credentials: ${rpcErrorMessage(error)}`);
+      }).finally(() => {
+        if (!cancelled) setCredentialsLoading(false);
+      });
+    }
+
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, connection?.id]);
 
@@ -174,16 +253,22 @@ export function ConnectionFormDialog({
         >
           <form.Field name="dialect">
             {(field) => (
-              <div className="grid grid-cols-3 gap-2">
-                {(["postgres", "mysql", "sqlite"] as Dialect[]).map((d) => (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(["postgres", "mysql", "sqlite", "bigquery"] as Dialect[]).map((d) => (
                   <button
                     key={d}
                     type="button"
+                    disabled={credentialsLoading}
                     onClick={() => {
+                      const previousDialect = field.state.value;
                       if (d !== field.state.value) form.setFieldValue("hasStoredUrl", false);
+                      setShowUrl(false);
+                      setShowPw(false);
                       field.handleChange(d);
                       form.setFieldValue("port", defaultPort(d));
-                      if (d === "sqlite") form.setFieldValue("mode", "fields");
+                      if (d === "bigquery") form.setFieldValue("host", "");
+                      else if (previousDialect === "bigquery" && (d === "postgres" || d === "mysql")) form.setFieldValue("host", "localhost");
+                      if (d === "sqlite" || d === "bigquery") form.setFieldValue("mode", "fields");
                     }}
                     className={cn(
                       "flex items-center gap-2 rounded-md px-3 py-2 text-sm shadow-hairline transition-colors",
@@ -191,7 +276,7 @@ export function ConnectionFormDialog({
                     )}
                   >
                     <DialectIcon dialect={d} />
-                    <span className="capitalize">{d === "sqlite" ? "SQLite" : d === "mysql" ? "MySQL" : "Postgres"}</span>
+                    <span>{dialectLabel(d)}</span>
                   </button>
                 ))}
               </div>
@@ -233,14 +318,66 @@ export function ConnectionFormDialog({
                     </div>
                   )}
                 </form.Field>
+              ) : dialect === "bigquery" ? (
+                <div className="grid gap-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <form.Field name="database">
+                      {(field) => (
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="conn-project">Google Cloud project ID</Label>
+                          <Input
+                            id="conn-project"
+                            className="font-mono text-xs"
+                            placeholder="acme-analytics"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                          />
+                          <FieldError errors={field.state.meta.errors} touched={field.state.meta.isTouched} />
+                        </div>
+                      )}
+                    </form.Field>
+                    <form.Field name="host">
+                      {(field) => (
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="conn-location">Location <span className="font-normal text-ink-3">(optional)</span></Label>
+                          <Input
+                            id="conn-location"
+                            className="font-mono text-xs"
+                            placeholder="US"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </form.Field>
+                  </div>
+                  <form.Field name="password">
+                    {(field) => (
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="conn-credentials">Service account JSON <span className="font-normal text-ink-3">(optional)</span></Label>
+                        <Textarea
+                          id="conn-credentials"
+                          className="max-h-32 font-mono text-xs"
+                          placeholder={editing ? "Leave blank to keep saved credentials" : "Paste JSON, or leave blank to use Application Default Credentials"}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                        />
+                        <FieldError errors={field.state.meta.errors} touched={field.state.meta.isTouched} />
+                      </div>
+                    )}
+                  </form.Field>
+                </div>
               ) : (
                 <>
                   <form.Field name="mode">
                     {(field) => (
-                      <Tabs value={field.state.value} onValueChange={(v) => field.handleChange(v as "fields" | "url")}>
+                      <Tabs value={field.state.value} onValueChange={(v) => switchMode(v as "fields" | "url")}>
                         <TabsList className="w-full">
-                          <TabsTrigger value="fields" className="flex-1">Fields</TabsTrigger>
-                          <TabsTrigger value="url" className="flex-1">Connection URL</TabsTrigger>
+                          <TabsTrigger value="fields" className="flex-1" disabled={credentialsLoading}>Fields</TabsTrigger>
+                          <TabsTrigger value="url" className="flex-1" disabled={credentialsLoading}>Connection URL</TabsTrigger>
                         </TabsList>
                       </Tabs>
                     )}
@@ -253,14 +390,33 @@ export function ConnectionFormDialog({
                           {(field) => (
                             <div className="grid gap-1.5">
                               <Label htmlFor="conn-url">URL</Label>
-                              <Input
-                                id="conn-url"
-                                className="font-mono text-xs"
-                                placeholder={`${dialect === "mysql" ? "mysql" : "postgres"}://user:pass@host:${dialect === "mysql" ? 3306 : 5432}/db`}
-                                value={field.state.value}
-                                onBlur={field.handleBlur}
-                                onChange={(e) => field.handleChange(e.target.value)}
-                              />
+                              <InputGroup>
+                                <InputGroupInput
+                                  id="conn-url"
+                                  type={showUrl ? "text" : "password"}
+                                  className="font-mono text-xs"
+                                  placeholder={credentialsLoading
+                                    ? "Loading saved URL…"
+                                    : `${dialect === "mysql" ? "mysql" : "postgres"}://user:pass@host:${dialect === "mysql" ? 3306 : 5432}/db`}
+                                  value={field.state.value}
+                                  disabled={credentialsLoading}
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                  onBlur={field.handleBlur}
+                                  onChange={(e) => field.handleChange(e.target.value)}
+                                />
+                                <InputGroupAddon align="inline-end">
+                                  <InputGroupButton
+                                    size="icon-xs"
+                                    onClick={() => setShowUrl((visible) => !visible)}
+                                    disabled={credentialsLoading || !field.state.value}
+                                    aria-label={showUrl ? "Hide connection URL" : "Show connection URL"}
+                                    aria-pressed={showUrl}
+                                  >
+                                    {showUrl ? <EyeOff /> : <Eye />}
+                                  </InputGroupButton>
+                                </InputGroupAddon>
+                              </InputGroup>
                               <FieldError errors={field.state.meta.errors} touched={field.state.meta.isTouched} />
                             </div>
                           )}
@@ -311,22 +467,30 @@ export function ConnectionFormDialog({
                             {(field) => (
                               <div className="col-span-6 grid gap-1.5">
                                 <Label htmlFor="conn-pw">Password</Label>
-                                <div className="relative">
-                                  <Input
+                                <InputGroup>
+                                  <InputGroupInput
                                     id="conn-pw"
                                     type={showPw ? "text" : "password"}
-                                    placeholder={editing ? "unchanged" : "••••••••"}
-                                    className="pr-9 font-mono text-xs"
+                                    placeholder={credentialsLoading ? "Loading saved password…" : "••••••••"}
+                                    className="font-mono text-xs"
                                     value={field.state.value}
+                                    disabled={credentialsLoading}
+                                    autoComplete="new-password"
                                     onBlur={field.handleBlur}
                                     onChange={(e) => field.handleChange(e.target.value)}
                                   />
-                                  <button type="button" onClick={() => setShowPw(!showPw)}
-                                    aria-label={showPw ? "Hide password" : "Show password"}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink">
-                                    {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                                  </button>
-                                </div>
+                                  <InputGroupAddon align="inline-end">
+                                    <InputGroupButton
+                                      size="icon-xs"
+                                      onClick={() => setShowPw((visible) => !visible)}
+                                      disabled={credentialsLoading || !field.state.value}
+                                      aria-label={showPw ? "Hide password" : "Show password"}
+                                      aria-pressed={showPw}
+                                    >
+                                      {showPw ? <EyeOff /> : <Eye />}
+                                    </InputGroupButton>
+                                  </InputGroupAddon>
+                                </InputGroup>
                               </div>
                             )}
                           </form.Field>
@@ -339,38 +503,44 @@ export function ConnectionFormDialog({
             }
           </form.Subscribe>
 
-          <div className="grid grid-cols-2 gap-3">
-            <form.Field name="env">
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label>Environment</Label>
-                  <Select value={field.state.value} onValueChange={(v) => field.handleChange(v as ConnectionEnv)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="local">Local</SelectItem>
-                      <SelectItem value="staging">Staging</SelectItem>
-                      <SelectItem value="prod">Production</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="ssl">
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label>SSL</Label>
-                  <Select value={field.state.value} onValueChange={(v) => field.handleChange(v as SslMode)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="disable">Disable</SelectItem>
-                      <SelectItem value="prefer">Prefer</SelectItem>
-                      <SelectItem value="require">Require</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </form.Field>
-          </div>
+          <form.Subscribe selector={(s) => s.values.dialect}>
+            {(dialect) => (
+              <div className={cn("grid gap-3", dialect === "bigquery" ? "grid-cols-1" : "grid-cols-2")}>
+                <form.Field name="env">
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <Label>Environment</Label>
+                      <Select value={field.state.value} onValueChange={(v) => field.handleChange(v as ConnectionEnv)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local">Local</SelectItem>
+                          <SelectItem value="staging">Staging</SelectItem>
+                          <SelectItem value="prod">Production</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </form.Field>
+                {dialect !== "bigquery" && (
+                  <form.Field name="ssl">
+                    {(field) => (
+                      <div className="grid gap-1.5">
+                        <Label>SSL</Label>
+                        <Select value={field.state.value} onValueChange={(v) => field.handleChange(v as SslMode)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="disable">Disable</SelectItem>
+                            <SelectItem value="prefer">Prefer</SelectItem>
+                            <SelectItem value="require">Require</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </form.Field>
+                )}
+              </div>
+            )}
+          </form.Subscribe>
 
           <form.Field name="readOnlyForAi">
             {(field) => (
@@ -390,7 +560,7 @@ export function ConnectionFormDialog({
 
           <DialogFooter className="min-w-0 sm:justify-between">
             <div className="flex min-w-0 items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => void runTest()} disabled={test.state === "testing"}>
+              <Button type="button" variant="outline" size="sm" onClick={() => void runTest()} disabled={credentialsLoading || test.state === "testing"}>
                 <TestTube2 className={cn(test.state === "testing" && "animate-pulse")} />
                 {test.state === "testing" ? "Testing…" : "Test connection"}
               </Button>
@@ -399,7 +569,7 @@ export function ConnectionFormDialog({
             </div>
             <form.Subscribe selector={(s) => [s.canSubmit, s.isSubmitting] as const}>
               {([canSubmit, isSubmitting]) => (
-                <Button type="submit" size="sm" disabled={!canSubmit || isSubmitting}>
+                <Button type="submit" size="sm" disabled={credentialsLoading || !canSubmit || isSubmitting}>
                   {isSubmitting ? "Saving…" : editing ? "Save changes" : "Save & connect"}
                 </Button>
               )}

@@ -47,7 +47,10 @@ export const DBCHAT_TOOL_SPECS: ReadonlyArray<{
     description: "Describe one table: columns (type, nullable, default), primary key, foreign keys and indexes.",
     inputSchema: {
       type: "object",
-      properties: { schema: { type: "string", description: "Schema name" }, table: { type: "string" } },
+      properties: {
+        schema: { type: "string", description: "Schema name (e.g. public, main, a MySQL database, or a BigQuery dataset)" },
+        table: { type: "string" },
+      },
       required: ["schema", "table"],
       additionalProperties: false,
     },
@@ -305,7 +308,7 @@ export const makeDbchatMcpServer = (ctx: ToolContext) => {
       tool(
         "describe_table",
         "Describe one table: columns (type, nullable, default), primary key, foreign keys and indexes.",
-        { schema: z.string().describe("Schema name (e.g. public, main, or the database name for MySQL)"), table: z.string() },
+        { schema: z.string().describe("Schema name (e.g. public, main, a MySQL database, or a BigQuery dataset)"), table: z.string() },
         (input) => invokeDbchatTool(ctx, "describe_table", input),
       ),
       tool(

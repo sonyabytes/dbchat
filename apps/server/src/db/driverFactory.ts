@@ -9,6 +9,7 @@ import type * as Effect from "effect/Effect";
 
 import type { ConnectionSecret } from "../Services/ConnectionStore.ts";
 import type { Driver } from "../Services/DriverRegistry.ts";
+import { makeBigQueryDriver } from "./bigquery.ts";
 import { makeMysqlDriver } from "./mysql.ts";
 import { makePostgresDriver } from "./postgres.ts";
 import { makeSqliteDriver } from "./sqlite.ts";
@@ -86,6 +87,12 @@ export const makeDriverFromSpec = (spec: DriverSpec): Effect.Effect<Driver, Conn
       });
     case "sqlite":
       return makeSqliteDriver({ filename: sqliteFilename(spec) });
+    case "bigquery":
+      return makeBigQueryDriver({
+        projectId: spec.database,
+        location: spec.host,
+        credentialsJson: spec.password,
+      });
   }
 };
 

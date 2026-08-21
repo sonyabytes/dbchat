@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { ConnectionId, IsoDateTime } from "./ids.ts";
 
-export const Dialect = Schema.Literals(["postgres", "mysql", "sqlite"]);
+export const Dialect = Schema.Literals(["postgres", "mysql", "sqlite", "bigquery"]);
 export type Dialect = typeof Dialect.Type;
 
 export const ConnectionEnv = Schema.Literals(["local", "staging", "prod"]);
@@ -26,6 +26,13 @@ export const Connection = Schema.Struct({
   lastUsedAt: Schema.optional(IsoDateTime),
 });
 export type Connection = typeof Connection.Type;
+
+/** Credentials returned only for the local edit form; never included in connection lists. */
+export const ConnectionCredentials = Schema.Struct({
+  password: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+});
+export type ConnectionCredentials = typeof ConnectionCredentials.Type;
 
 /** Input for create/update/test. Either fill the fields or pass a `url`. */
 export const ConnectionInput = Schema.Struct({

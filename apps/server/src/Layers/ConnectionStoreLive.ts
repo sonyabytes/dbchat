@@ -2,8 +2,8 @@
  * sqlite-backed ConnectionStore.
  *
  * Metadata lives in `connections`; passwords / URLs live encrypted in
- * `connection_secrets` (see `db/secrets.ts`). `Connection` values handed back
- * to callers never contain a secret.
+ * `connection_secrets` (see `db/secrets.ts`). Ordinary `Connection` values
+ * never contain a secret; the edit flow requests credentials explicitly.
  */
 import {
   type Connection,
@@ -40,7 +40,7 @@ interface ConnectionRow {
 }
 
 const asDialect = (s: string): Connection["dialect"] =>
-  s === "mysql" ? "mysql" : s === "sqlite" ? "sqlite" : "postgres";
+  s === "mysql" ? "mysql" : s === "sqlite" ? "sqlite" : s === "bigquery" ? "bigquery" : "postgres";
 const asEnv = (s: string): Connection["env"] => (s === "prod" ? "prod" : s === "staging" ? "staging" : "local");
 const asSsl = (s: string): Connection["ssl"] => (s === "disable" ? "disable" : s === "require" ? "require" : "prefer");
 
@@ -140,20 +140,24 @@ export const ConnectionStoreLive = Layer.effect(
       Effect.gen(function* () {
         const previous = yield* get(id);
         const storedSecret = Option.getOrUndefined(yield* getSecret(id));
-        const effectiveInput = mergeConnectionSecret(input, storedSecret);
+        const effectiveInput = mergeConnectionSecret(
+          input,
+          previous.dialect === input.dialect ? storedSecret : undefined,
+        );
         const problem = validateConnectionInput(effectiveInput);
         if (problem) return yield* Effect.fail(problem);
         const r = row(input);
         const suppliedUrl = input.url?.trim();
         const switchedToUrl = suppliedUrl !== undefined && suppliedUrl.length > 0;
+        const switchedDialect = previous.dialect !== input.dialect;
         yield* die(sql`
           UPDATE connections SET
             name = ${r.name},
             dialect = ${r.dialect},
-            host = ${switchedToUrl ? "" : input.host ?? previous.host},
-            port = ${switchedToUrl ? DEFAULT_PORT[input.dialect] : input.port ?? previous.port},
-            "database" = ${switchedToUrl ? "" : input.database ?? previous.database},
-            "user" = ${switchedToUrl ? "" : input.user ?? previous.user},
+            host = ${switchedToUrl ? "" : input.host ?? (switchedDialect ? "" : previous.host)},
+            port = ${switchedToUrl ? DEFAULT_PORT[input.dialect] : input.port ?? (switchedDialect ? DEFAULT_PORT[input.dialect] : previous.port)},
+            "database" = ${switchedToUrl ? "" : input.database ?? (switchedDialect ? "" : previous.database)},
+            "user" = ${switchedToUrl ? "" : input.user ?? (switchedDialect ? "" : previous.user)},
             env = ${r.env},
             ssl = ${r.ssl},
             read_only_for_ai = ${r.readOnly},

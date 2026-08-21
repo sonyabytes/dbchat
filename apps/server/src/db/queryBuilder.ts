@@ -1,11 +1,11 @@
 /**
- * Dialect-aware SELECT builder shared by the three drivers' `rows`
+ * Dialect-aware SELECT builder shared by the database drivers' `rows`
  * implementation. Identifiers are quoted (never interpolated raw) and every
  * filter value becomes a bound parameter.
  */
 import type { FilterSpec, RowsRequest, SortSpec } from "@dbchat/contracts";
 
-export type Dialect = "postgres" | "mysql" | "sqlite";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "bigquery";
 
 export interface BuiltQuery {
   readonly text: string;
@@ -16,7 +16,7 @@ export interface BuiltQuery {
 export const quoteIdent = (dialect: Dialect, name: string): string => {
   if (name.length === 0) throw new Error("empty identifier");
   if (name.includes("\0")) throw new Error("identifier contains a NUL byte");
-  if (dialect === "mysql") return "`" + name.replaceAll("`", "``") + "`";
+  if (dialect === "mysql" || dialect === "bigquery") return "`" + name.replaceAll("`", "``") + "`";
   return '"' + name.replaceAll('"', '""') + '"';
 };
 

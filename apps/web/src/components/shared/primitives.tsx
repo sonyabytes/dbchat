@@ -7,8 +7,8 @@ import type { ColumnMeta, Row as ContractRow } from "@dbchat/contracts";
 
 /* ---------- Dialect / env chips ---------- */
 export function DialectIcon({ dialect, className }: { dialect: Dialect; className?: string }) {
-  const label = dialect === "postgres" ? "PG" : dialect === "mysql" ? "My" : "Lite";
-  const tone = dialect === "postgres" ? "bg-brand-tint text-brand-ink" : dialect === "mysql" ? "bg-warning-tint text-warning" : "bg-inset text-ink-2";
+  const label = dialect === "postgres" ? "PG" : dialect === "mysql" ? "My" : dialect === "bigquery" ? "BQ" : "Lite";
+  const tone = dialect === "postgres" || dialect === "bigquery" ? "bg-brand-tint text-brand-ink" : dialect === "mysql" ? "bg-warning-tint text-warning" : "bg-inset text-ink-2";
   return (
     <span className={cn("inline-flex size-6 shrink-0 items-center justify-center rounded-sm font-mono text-[10px] font-semibold", tone, className)}>
       {label}

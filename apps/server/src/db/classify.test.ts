@@ -48,7 +48,7 @@ describe("scrub", () => {
   });
 });
 
-const readOnly = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres") =>
+const readOnly = (sql: string, dialect: "postgres" | "mysql" | "sqlite" | "bigquery" = "postgres") =>
   isReadOnlySql(sql, dialect).readOnly;
 
 describe("isReadOnlySql — reads", () => {
@@ -202,6 +202,11 @@ describe("classifyStatements", () => {
 
   test("sqlite select", () => {
     expect(classifyStatements("select * from sqlite_master", "sqlite")[0]!.kind).toBe("read");
+  });
+
+  test("bigquery qualified backtick identifiers", () => {
+    expect(classifyStatements("select * from `acme.analytics.orders`", "bigquery")[0]!.kind).toBe("read");
+    expect(classifyStatements("delete from `acme.analytics.orders` where id = 1", "bigquery")[0]!.kind).toBe("write");
   });
 });
 
