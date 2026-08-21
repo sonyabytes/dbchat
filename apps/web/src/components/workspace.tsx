@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, MessageSquare, Moon, PanelRight, Plus, RefreshCw, Search, Settings, Sun, Table2, TerminalSquare, X } from "lucide-react";
+import { ArrowLeft, Download, Loader2, MessageSquare, Moon, PanelRight, Plus, RefreshCw, Search, Settings, Sun, Table2, TerminalSquare, X } from "lucide-react";
 import type { ConnectionId } from "@dbchat/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,30 @@ import { ThreadList } from "@/components/chat/thread-list";
 import { ChatView } from "@/components/screens/chat";
 
 /* ---------------- Sidebar: schema explorer + threads ---------------- */
+function CheckForUpdatesButton() {
+  const [checking, setChecking] = useState(false);
+  const desktop = window.dbchat;
+  if (!desktop?.canCheckForUpdates) return null;
+
+  const check = async () => {
+    setChecking(true);
+    try {
+      await desktop.checkForUpdates();
+    } catch (error) {
+      console.error("Could not open the update checker", error);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <Button variant="outline" onClick={() => void check()} disabled={checking} aria-live="polite" className="mb-1 w-full justify-start">
+      {checking ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Download data-icon="inline-start" />}
+      {checking ? "Checking…" : "Check for updates"}
+    </Button>
+  );
+}
+
 function Sidebar() {
   const { connection, dark } = useApp();
   const openTab = useOpenTab();
@@ -90,16 +114,19 @@ function Sidebar() {
         {section === "schema" ? <SchemaTree connectionId={connectionId} filter={q} /> : <ThreadList connectionId={connection.id} />}
       </div>
 
-      <div className="flex h-10 items-center gap-1 border-t border-line px-2">
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" aria-label="Command palette" onClick={() => openPalette(true)} />}><Search /></TooltipTrigger>
-          <TooltipContent>Command palette · ⌘K</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" aria-label="Settings" onClick={() => void navigate({ to: "/settings" })} />}><Settings /></TooltipTrigger>
-          <TooltipContent>Settings · ⌘,</TooltipContent>
-        </Tooltip>
-        <Button variant="ghost" size="icon-xs" aria-label="Toggle theme" onClick={toggleTheme} className="ml-auto">{dark ? <Sun /> : <Moon />}</Button>
+      <div className="border-t border-line p-2">
+        <CheckForUpdatesButton />
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Command palette" onClick={() => openPalette(true)} />}><Search /></TooltipTrigger>
+            <TooltipContent>Command palette · ⌘K</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Settings" onClick={() => void navigate({ to: "/settings" })} />}><Settings /></TooltipTrigger>
+            <TooltipContent>Settings · ⌘,</TooltipContent>
+          </Tooltip>
+          <Button variant="ghost" size="icon-sm" aria-label="Toggle theme" onClick={toggleTheme} className="ml-auto">{dark ? <Sun /> : <Moon />}</Button>
+        </div>
       </div>
     </aside>
   );
