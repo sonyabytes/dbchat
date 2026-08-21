@@ -1,0 +1,25 @@
+{
+  "name": "@dbchat/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "dbchat — chat-centred SQL GUI",
+  "author": "dbchat",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "bun scripts/build-main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo no tests",
+    "start": "bun scripts/build-main.ts && electron .",
+    "icon": "bun scripts/make-icon.ts",
+    "dist": "bun scripts/build-main.ts && electron-builder --mac dmg --arm64 --config electron-builder.yml"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.2.0",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "typescript": "~6.0.2"
+  }
+}

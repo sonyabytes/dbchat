@@ -1,0 +1,31 @@
+{
+  "name": "dbchat",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "dev:server": "bun --filter @dbchat/server dev",
+    "dev:web": "bun --filter @dbchat/web dev",
+    "build": "bun run --filter @dbchat/contracts build && bun run --filter @dbchat/server build && bun run --filter @dbchat/web build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test",
+    "lint": "oxlint",
+    "dev:desktop": "bun scripts/dev-desktop.ts",
+    "build:sidecar": "bun apps/server/scripts/build-sidecar.ts",
+    "dist:desktop": "bun scripts/dist-desktop.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "oxlint": "^1.75.0",
+    "typescript": "~6.0.2"
+  },
+  "trustedDependencies": [
+    "electron"
+  ]
+}

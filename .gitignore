@@ -1,0 +1,9 @@
+node_modules
+dist
+.playwright-mcp
+*.png
+*.tsbuildinfo
+.DS_Store
+apps/desktop/release
+apps/desktop/sidecar
+apps/desktop/resources/icon.iconset

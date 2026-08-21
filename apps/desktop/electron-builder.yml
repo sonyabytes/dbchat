@@ -1,0 +1,40 @@
+appId: dev.dbchat.desktop
+productName: dbchat
+copyright: dbchat
+directories:
+  output: release
+  buildResources: resources
+# Only the bundled main/preload go into app.asar; everything else is extraResources.
+files:
+  - dist/**
+  - package.json
+  - "!node_modules/**"
+extraResources:
+  - from: ../web/dist
+    to: web
+  - from: sidecar
+    to: bin
+    filter: ["dbchat-server", "claude"]
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64]
+  # Unsigned, un-notarized local build. Keep ad-hoc signing so the binary launches on Apple Silicon.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  darkModeSupport: true
+  extendInfo:
+    NSHumanReadableCopyright: dbchat
+dmg:
+  sign: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  contents:
+    - { x: 130, y: 220 }
+    - { x: 410, y: 220, type: link, path: /Applications }

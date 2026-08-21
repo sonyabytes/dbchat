@@ -1,0 +1,21 @@
+{
+  "name": "@dbchat/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'no tests'"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.111"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  }
+}
