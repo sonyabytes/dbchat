@@ -10,12 +10,13 @@
   "scripts": {
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'no tests'"
+    "test": "bun test"
   },
   "dependencies": {
     "effect": "4.0.0-rc.111"
   },
   "devDependencies": {
+    "@types/bun": "^1.4.0",
     "typescript": "~6.0.2"
   }
 }
