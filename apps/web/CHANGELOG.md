@@ -1,5 +1,19 @@
 # @dbchat/web
 
+## 0.4.0
+
+### Minor Changes
+
+- 6b918ec: Add a right-click context menu on chat threads in the sidebar (Open, Copy title, Close tab, Delete) using the shadcn `context-menu` component.
+- d706ce8: Replace the sidebar "Check for updates" button with a single status icon. Hover shows the version diff and release notes; click downloads the update, then the icon switches to "restart to install". Background update checks no longer pop a dialog — they just light up the icon.
+
+### Patch Changes
+
+- a76b6b6: Fix chat loading state: replace the boxed "Working…" card with an inline spinner + shimmer loader, and keep the loader visible after the first tool call until text streams in.
+- 32ce49d: Settings → Providers now keeps a default model per provider. Picking Codex no longer shows the Anthropic server default (Sonnet 5); each provider card lists only its own models, and a "Use for new chats" button chooses which provider new chats start on.
+- d706ce8: `bun run dev` now runs web and server behind portless: `https://dbchat.localhost` / `https://dbchat-api.localhost`, with a branch prefix in git worktrees so multiple checkouts don't fight over :5173. Set `DBCHAT_NO_PORTLESS=1` for the old fixed ports.
+- @dbchat/contracts@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

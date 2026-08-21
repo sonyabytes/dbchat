@@ -1,5 +1,12 @@
 # @dbchat/server
 
+## 0.4.0
+
+### Patch Changes
+
+- d706ce8: `bun run dev` now runs web and server behind portless: `https://dbchat.localhost` / `https://dbchat-api.localhost`, with a branch prefix in git worktrees so multiple checkouts don't fight over :5173. Set `DBCHAT_NO_PORTLESS=1` for the old fixed ports.
+- @dbchat/contracts@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes
