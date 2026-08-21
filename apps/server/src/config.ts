@@ -15,10 +15,10 @@ export interface ServerConfigShape {
   readonly model: string;
   readonly version: string;
   /**
-   * Path to the Claude Code CLI binary for the Agent SDK (`pathToClaudeCodeExecutable`).
-   * `undefined` = let the SDK resolve its own `@anthropic-ai/claude-agent-sdk-<platform>` package.
-   * The desktop shell sets `DBCHAT_CLAUDE_CLI` because that resolution cannot work inside a
-   * `bun build --compile` binary (see apps/server/scripts/build-sidecar.ts).
+   * `DBCHAT_CLAUDE_CLI`: fallback Claude Code binary (the desktop shell points this at its bundled
+   * copy, since SDK self-resolution cannot work inside a `bun build --compile` binary). The actual
+   * binary/config-dir/env used per turn is resolved in agent/claudeRuntime.ts (user settings and
+   * `claude` on PATH take precedence).
    */
   readonly claudeCliPath: string | undefined;
 }
