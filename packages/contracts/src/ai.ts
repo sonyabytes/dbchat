@@ -8,7 +8,7 @@
  */
 import * as Schema from "effect/Schema";
 
-export const ProviderId = Schema.Literals(["anthropic"]);
+export const ProviderId = Schema.Literals(["anthropic", "openai", "opencode"]);
 export type ProviderId = typeof ProviderId.Type;
 
 /** Rough capability/speed bucket, rendered as a pill next to the model name. */

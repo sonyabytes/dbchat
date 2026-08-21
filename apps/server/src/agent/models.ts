@@ -45,6 +45,15 @@ export const ANTHROPIC_MODELS: ReadonlyArray<ModelInfo> = [
   },
 ];
 
+export const CODEX_MODELS: ReadonlyArray<ModelInfo> = [
+  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", provider: "openai", tier: "frontier", description: "OpenAI's coding agent model." },
+  { id: "gpt-5.2-codex", label: "GPT-5.2 Codex", provider: "openai", tier: "balanced", description: "A faster Codex model for everyday work." },
+];
+
+export const OPENCODE_MODELS: ReadonlyArray<ModelInfo> = [
+  { id: "opencode/big-pickle", label: "Big Pickle", provider: "opencode", tier: "balanced", description: "OpenCode's recommended general-purpose model." },
+];
+
 /** `DBCHAT_MODEL`, trimmed, or the built-in default. */
 export const resolveDefaultModel = (env: Record<string, string | undefined> = process.env): string =>
   env.DBCHAT_MODEL?.trim() || DEFAULT_MODEL;
@@ -63,6 +72,20 @@ export const buildCatalog = (defaultModel: string = resolveDefaultModel()): Read
     status: "ready",
     models: ANTHROPIC_MODELS.map((m) => (m.id === defaultModel ? { ...m, default: true } : m)),
   },
+  {
+    provider: "openai",
+    label: "Codex",
+    status: "unavailable",
+    reason: "Codex runtime setup is not configured yet",
+    models: CODEX_MODELS,
+  },
+  {
+    provider: "opencode",
+    label: "OpenCode",
+    status: "unavailable",
+    reason: "OpenCode runtime setup is not configured yet",
+    models: OPENCODE_MODELS,
+  },
 ];
 
 /** Every model id the catalog knows about, across providers. */
@@ -73,6 +96,9 @@ export const findModel = (
   id: string,
   catalog: ReadonlyArray<ProviderModels> = buildCatalog(),
 ): ModelInfo | undefined => catalog.flatMap((p) => p.models).find((m) => m.id === id);
+
+const readyModel = (id: string, catalog: ReadonlyArray<ProviderModels>): boolean =>
+  catalog.some((provider) => provider.status === "ready" && provider.models.some((model) => model.id === id));
 
 export interface ModelResolution {
   readonly ok: boolean;
@@ -96,12 +122,12 @@ export const resolveModel = (args: {
   const catalog = args.catalog ?? buildCatalog(args.defaultModel);
   const requested = args.requested?.trim();
   if (requested) {
-    return findModel(requested, catalog)
+    return readyModel(requested, catalog)
       ? { ok: true, model: requested }
-      : { ok: false, model: args.defaultModel, reason: `Unknown model "${requested}"` };
+      : { ok: false, model: args.defaultModel, reason: `Model "${requested}" is unknown or its provider is unavailable` };
   }
   const threadModel = args.threadModel?.trim();
   // A thread pinned to a model that has since disappeared quietly falls back.
-  if (threadModel && findModel(threadModel, catalog)) return { ok: true, model: threadModel };
+  if (threadModel && readyModel(threadModel, catalog)) return { ok: true, model: threadModel };
   return { ok: true, model: args.defaultModel };
 };
