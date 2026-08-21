@@ -1,5 +1,11 @@
 # @dbchat/desktop
 
+## 0.4.0
+
+### Minor Changes
+
+- d706ce8: Replace the sidebar "Check for updates" button with a single status icon. Hover shows the version diff and release notes; click downloads the update, then the icon switches to "restart to install". Background update checks no longer pop a dialog — they just light up the icon.
+
 ## 0.3.0
 
 ### Patch Changes
