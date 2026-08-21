@@ -2,7 +2,7 @@ import type { MessagePart } from "@dbchat/contracts";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
-import { ThinkingState, ToolChip } from "@/components/shared/primitives";
+import { Loader, ThinkingState, ToolChip } from "@/components/shared/primitives";
 import { Button } from "@/components/ui/button";
 import type { UiMessage } from "@/lib/chat-store";
 
@@ -151,9 +151,17 @@ export function ChatMessage({
   };
   const tokens = message.usage ? message.usage.inputTokens + message.usage.outputTokens : undefined;
 
+  // While streaming, keep a visible "working" signal unless the last part is already live
+  // (streaming text or reasoning). This covers the gap after a tool finishes and before the
+  // next tool/text arrives — previously the loader vanished on the first tool call.
+  const lastPart = message.parts[message.parts.length - 1];
+  const lastIsLive = lastPart?._tag === "Text" ? lastPart.text.trim().length > 0 : lastPart?._tag === "Thinking";
+  const showLoader = streaming && !lastIsLive;
+  const runningTool = lastPart?._tag === "ToolCall" && lastPart.status === "running";
+  const loaderLabel = runningTool ? `Running ${toolMeta(lastPart).label}…` : blocks.length === 0 ? "Working…" : "Thinking…";
+
   return (
     <div className="flex flex-col gap-3">
-      {blocks.length === 0 && streaming && <ThinkingState live title="Working…" steps={[]} />}
 
       {blocks.map((b, i) => {
         if (b.kind === "tools") {
@@ -211,6 +219,8 @@ export function ChatMessage({
             return null;
         }
       })}
+
+      {showLoader && <Loader label={loaderLabel} />}
 
       {!streaming && blocks.length > 0 && (
         <div className="flex items-center gap-1 text-ink-3">
