@@ -11,13 +11,15 @@ import {
 } from "./models.ts";
 
 describe("catalog", () => {
-  test("ships one Anthropic group with fast / balanced / frontier", () => {
+  test("ships Anthropic, Codex, and OpenCode together", () => {
     const catalog = buildCatalog();
-    expect(catalog).toHaveLength(1);
+    expect(catalog).toHaveLength(3);
+    expect(catalog.map((provider) => provider.provider)).toEqual(["anthropic", "openai", "opencode"]);
     expect(catalog[0]!.provider).toBe("anthropic");
     expect(catalog[0]!.status).toBe("ready");
     expect(catalog[0]!.models.map((m) => m.tier)).toEqual(["fast", "balanced", "frontier"]);
-    expect(catalogModelIds()).toEqual(["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"]);
+    expect(catalogModelIds()).toContain("gpt-5.3-codex");
+    expect(catalogModelIds()).toContain("opencode/big-pickle");
   });
 
   test("DBCHAT_MODEL moves the `default` marker; exactly one model carries it", () => {
@@ -79,6 +81,12 @@ describe("resolveModel", () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("gpt-5");
     expect(r.model).toBe(defaultModel);
+  });
+
+  test("a model belonging to an unavailable provider is rejected", () => {
+    const result = resolveModel({ requested: "gpt-5.3-codex", defaultModel });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("unavailable");
   });
 
   test("a thread pinned to a model we no longer ship quietly falls back", () => {
