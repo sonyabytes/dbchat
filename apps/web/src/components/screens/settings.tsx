@@ -21,12 +21,22 @@ import { useState } from "react";
 import { ModelCombobox } from "@/components/chat/model-combobox";
 import { ClaudeRuntimeSection } from "@/components/settings/claude-runtime-section";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { SHORTCUTS } from "@/lib/keybindings";
-import { type PageSize, type RowLimit, type ThemePref, useSettings } from "@/lib/settings";
+import {
+  FONT_SCALES,
+  type FontScale,
+  type MonoFontPreset,
+  type PageSize,
+  type RowLimit,
+  type ThemePref,
+  type UiFontPreset,
+  useSettings,
+} from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { catalogDefaultModel, modelsQuery } from "@/rpc/ai";
 
@@ -193,6 +203,67 @@ export function SettingsScreen() {
                       { value: "dark", label: <><Moon /> Dark</> },
                     ]}
                   />
+                </SettingRow>
+              </SettingsCard>
+            ) : null}
+
+            {page === "appearance" ? (
+              <SettingsCard title="Typography" description="Fonts and size for the interface and the editor.">
+                <SettingRow label="Font size" hint="Scales the whole interface, including the editor and tables.">
+                  <Segmented<FontScale>
+                    label="Font size"
+                    value={settings.fontScale}
+                    onChange={settings.setFontScale}
+                    options={FONT_SCALES.map((f) => ({ value: f.value, label: f.label, title: `${Math.round(f.value * 100)}%` }))}
+                  />
+                </SettingRow>
+                <Separator />
+                <SettingRow label="Interface font" hint="Custom uses any font installed on this machine.">
+                  <div className="flex items-center gap-2">
+                    {settings.uiFont === "custom" && (
+                      <Input
+                        className="h-7 w-40 text-[12px]"
+                        placeholder="e.g. Geist, Helvetica"
+                        aria-label="Custom interface font"
+                        value={settings.uiFontCustom}
+                        onChange={(e) => settings.setUiFont("custom", e.target.value)}
+                      />
+                    )}
+                    <Segmented<UiFontPreset>
+                      label="Interface font"
+                      value={settings.uiFont}
+                      onChange={(v) => settings.setUiFont(v)}
+                      options={[
+                        { value: "inter", label: "Inter" },
+                        { value: "system", label: "System" },
+                        { value: "custom", label: "Custom" },
+                      ]}
+                    />
+                  </div>
+                </SettingRow>
+                <Separator />
+                <SettingRow label="Code font" hint="Used by the SQL editor, table cells and code blocks.">
+                  <div className="flex items-center gap-2">
+                    {settings.monoFont === "custom" && (
+                      <Input
+                        className="h-7 w-40 font-mono text-[12px]"
+                        placeholder="e.g. Fira Code, Menlo"
+                        aria-label="Custom code font"
+                        value={settings.monoFontCustom}
+                        onChange={(e) => settings.setMonoFont("custom", e.target.value)}
+                      />
+                    )}
+                    <Segmented<MonoFontPreset>
+                      label="Code font"
+                      value={settings.monoFont}
+                      onChange={(v) => settings.setMonoFont(v)}
+                      options={[
+                        { value: "jetbrains", label: "JetBrains Mono" },
+                        { value: "system", label: "System" },
+                        { value: "custom", label: "Custom" },
+                      ]}
+                    />
+                  </div>
                 </SettingRow>
               </SettingsCard>
             ) : null}

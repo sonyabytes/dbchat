@@ -14,9 +14,27 @@ import { useApp } from "./store";
 export type ThemePref = "system" | "light" | "dark";
 export type RowLimit = 100 | 500 | 1000 | 5000;
 export type PageSize = 50 | 100 | 200;
+/** Interface scale; applied as CSS `zoom` on <html> so px-sized text scales too. */
+export type FontScale = 0.85 | 0.9 | 1 | 1.1 | 1.25;
+export type UiFontPreset = "inter" | "system" | "custom";
+export type MonoFontPreset = "jetbrains" | "system" | "custom";
+
+export const FONT_SCALES: ReadonlyArray<{ value: FontScale; label: string }> = [
+  { value: 0.85, label: "XS" },
+  { value: 0.9, label: "S" },
+  { value: 1, label: "M" },
+  { value: 1.1, label: "L" },
+  { value: 1.25, label: "XL" },
+];
 
 interface SettingsState {
   theme: ThemePref;
+  fontScale: FontScale;
+  uiFont: UiFontPreset;
+  /** Font family name used when `uiFont === "custom"`. */
+  uiFontCustom: string;
+  monoFont: MonoFontPreset;
+  monoFontCustom: string;
   /** Default LIMIT applied to SQL editor runs. */
   rowLimit: RowLimit;
   /** Rows per page in the table browser. */
@@ -28,6 +46,9 @@ interface SettingsState {
   /** Preferred model id for new chats; `null` = whatever the server defaults to. */
   defaultModel: string | null;
   setTheme: (t: ThemePref) => void;
+  setFontScale: (n: FontScale) => void;
+  setUiFont: (p: UiFontPreset, custom?: string) => void;
+  setMonoFont: (p: MonoFontPreset, custom?: string) => void;
   setRowLimit: (n: RowLimit) => void;
   setPageSize: (n: PageSize) => void;
   setConfirmDml: (v: boolean) => void;
@@ -39,6 +60,11 @@ export const useSettings = create<SettingsState>()(
   persist(
     (set) => ({
       theme: "system",
+      fontScale: 1,
+      uiFont: "inter",
+      uiFontCustom: "",
+      monoFont: "jetbrains",
+      monoFontCustom: "",
       rowLimit: 500,
       pageSize: 100,
       confirmDml: true,
@@ -47,6 +73,18 @@ export const useSettings = create<SettingsState>()(
       setTheme: (theme) => {
         set({ theme });
         applyTheme(theme);
+      },
+      setFontScale: (fontScale) => {
+        set({ fontScale });
+        applyTypography();
+      },
+      setUiFont: (uiFont, custom) => {
+        set(custom === undefined ? { uiFont } : { uiFont, uiFontCustom: custom });
+        applyTypography();
+      },
+      setMonoFont: (monoFont, custom) => {
+        set(custom === undefined ? { monoFont } : { monoFont, monoFontCustom: custom });
+        applyTypography();
       },
       setRowLimit: (rowLimit) => set({ rowLimit }),
       setPageSize: (pageSize) => set({ pageSize }),
@@ -60,11 +98,50 @@ export const useSettings = create<SettingsState>()(
       name: "dbchat.settings",
       version: 1,
       onRehydrateStorage: () => (state) => {
-        if (state) applyTheme(state.theme);
+        if (state) {
+          applyTheme(state.theme);
+          applyTypography(state);
+        }
       },
     },
   ),
 );
+
+/* ---------------- typography ---------------- */
+
+const UI_FONT_STACKS: Record<Exclude<UiFontPreset, "custom">, string> = {
+  inter: '"Inter Variable"',
+  system: "system-ui",
+};
+const MONO_FONT_STACKS: Record<Exclude<MonoFontPreset, "custom">, string> = {
+  jetbrains: '"JetBrains Mono Variable"',
+  system: "ui-monospace",
+};
+
+/** Quote a user-typed family name so spaces/odd characters are valid CSS. */
+function quoteFamily(name: string): string {
+  return `"${name.trim().replace(/["\\]/g, "")}"`;
+}
+
+/**
+ * Write the user's font choices into CSS variables that `index.css` puts at the
+ * front of `--font-sans` / `--font-mono`, and scale the UI via `zoom`.
+ */
+export function applyTypography(
+  s: Pick<SettingsState, "fontScale" | "uiFont" | "uiFontCustom" | "monoFont" | "monoFontCustom"> = useSettings.getState(),
+): void {
+  const root = document.documentElement;
+  const ui = s.uiFont === "custom" ? (s.uiFontCustom.trim() ? quoteFamily(s.uiFontCustom) : UI_FONT_STACKS.inter) : UI_FONT_STACKS[s.uiFont];
+  const mono =
+    s.monoFont === "custom"
+      ? s.monoFontCustom.trim()
+        ? quoteFamily(s.monoFontCustom)
+        : MONO_FONT_STACKS.jetbrains
+      : MONO_FONT_STACKS[s.monoFont];
+  root.style.setProperty("--user-font-sans", ui);
+  root.style.setProperty("--user-font-mono", mono);
+  root.style.zoom = s.fontScale === 1 ? "" : String(s.fontScale);
+}
 
 /* ---------------- theme ---------------- */
 
@@ -104,6 +181,7 @@ export function initTheme(): void {
   if (themeInitialised) return;
   themeInitialised = true;
   applyTheme();
+  applyTypography();
   const mq = media();
   mq?.addEventListener("change", () => {
     if (useSettings.getState().theme === "system") applyTheme("system");
