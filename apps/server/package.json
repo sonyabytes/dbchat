@@ -18,6 +18,7 @@
     "@effect/sql-mysql2": "4.0.0-rc.111",
     "@effect/sql-pg": "4.0.0-rc.111",
     "@effect/sql-sqlite-bun": "4.0.0-rc.111",
+    "@google-cloud/bigquery": "^8.1.1",
     "effect": "4.0.0-rc.111",
     "mysql2": "^3.14.0",
     "node-sql-parser": "^5.3.0",

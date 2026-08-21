@@ -30,7 +30,9 @@ const NO_COLUMNS: ReadonlyArray<ColumnMeta> = [];
 /* ---------------- SQL / CSV helpers ---------------- */
 
 function quoteIdent(name: string, dialect: Dialect): string {
-  return dialect === "mysql" ? `\`${name.replace(/`/g, "``")}\`` : `"${name.replace(/"/g, '""')}"`;
+  return dialect === "mysql" || dialect === "bigquery"
+    ? `\`${name.replace(/`/g, "``")}\``
+    : `"${name.replace(/"/g, '""')}"`;
 }
 
 function quoteLiteral(v: unknown, dialect: Dialect): string {

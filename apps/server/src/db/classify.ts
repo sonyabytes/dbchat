@@ -11,12 +11,12 @@
  *     is unambiguously introspective (`show` / `explain` / `describe`);
  *     anything else that fails to parse is treated as unknown ⇒ not read-only.
  *
- * The parser alone is bypassable, so this is deliberately belt-and-braces; the
- * drivers additionally run reads inside a READ ONLY transaction.
+ * The parser alone is bypassable, so this is deliberately belt-and-braces;
+ * transactional drivers additionally run reads inside a READ ONLY transaction.
  */
 import { Parser } from "node-sql-parser";
 
-export type Dialect = "postgres" | "mysql" | "sqlite";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "bigquery";
 
 export type StatementKind = "read" | "write" | "ddl" | "other";
 
@@ -38,6 +38,7 @@ const parserDialect: Record<Dialect, string> = {
   postgres: "postgresql",
   mysql: "mysql",
   sqlite: "sqlite",
+  bigquery: "bigquery",
 };
 
 /** Leading keywords that may begin a read-only statement. */
@@ -86,6 +87,7 @@ const DENY_FUNCTIONS: Record<Dialect, ReadonlyArray<string>> = {
   ],
   mysql: ["sleep", "benchmark", "load_file", "sys_exec", "sys_eval", "get_lock", "release_lock", "release_all_locks", "master_pos_wait", "source_pos_wait"],
   sqlite: ["load_extension", "writefile", "readfile", "fsdir", "edit"],
+  bigquery: [],
 };
 
 const deniedFunction = (scrubbed: string, dialect: Dialect): string | undefined => {
@@ -127,7 +129,7 @@ export const splitStatements = (sql: string, dialect: Dialect): ReadonlyArray<st
       buf += "*/"; i += 2;
       continue;
     }
-    if (c === "'" || c === '"' || (dialect === "mysql" && c === "`")) {
+    if (c === "'" || c === '"' || ((dialect === "mysql" || dialect === "bigquery") && c === "`")) {
       const q = c;
       buf += c; i++;
       while (i < n) {

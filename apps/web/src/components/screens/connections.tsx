@@ -22,7 +22,9 @@ import { connectionListQuery, rpcErrorMessage } from "@/rpc/queries";
 type RowState = { state: ConnectionStatus["state"] | "connecting"; latencyMs?: number; error?: string };
 
 function target(c: Connection) {
-  return c.dialect === "sqlite" ? c.database : `${c.user}@${c.host}:${c.port}/${c.database}`;
+  if (c.dialect === "sqlite") return c.database;
+  if (c.dialect === "bigquery") return `${c.database}${c.host ? ` · ${c.host}` : ""}`;
+  return `${c.user}@${c.host}:${c.port}/${c.database}`;
 }
 
 function ConnectionRow({

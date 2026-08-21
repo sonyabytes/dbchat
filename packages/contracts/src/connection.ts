@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { ConnectionId, IsoDateTime } from "./ids.ts";
 
-export const Dialect = Schema.Literals(["postgres", "mysql", "sqlite"]);
+export const Dialect = Schema.Literals(["postgres", "mysql", "sqlite", "bigquery"]);
 export type Dialect = typeof Dialect.Type;
 
 export const ConnectionEnv = Schema.Literals(["local", "staging", "prod"]);

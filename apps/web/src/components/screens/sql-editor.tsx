@@ -1,4 +1,4 @@
-import { PostgreSQL, sql as sqlLang } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLite, StandardSQL, sql as sqlLang } from "@codemirror/lang-sql";
 import { EditorView, keymap } from "@codemirror/view";
 import type { ConnectionId, SqlResult, SqlSuggestion } from "@dbchat/contracts";
 import { useDebouncedCallback } from "@tanstack/react-pacer";
@@ -318,10 +318,20 @@ export function SqlEditor({ queryId: queryIdProp }: { queryId?: string } = {}) {
           },
         ]),
       ),
-      sqlLang({ dialect: PostgreSQL, schema: schemaMap, upperCaseKeywords: false }),
+      sqlLang({
+        dialect: connection?.dialect === "mysql"
+          ? MySQL
+          : connection?.dialect === "sqlite"
+            ? SQLite
+            : connection?.dialect === "bigquery"
+              ? StandardSQL
+              : PostgreSQL,
+        schema: schemaMap,
+        upperCaseKeywords: false,
+      }),
       theme,
     ],
-    [schemaMap],
+    [connection?.dialect, schemaMap],
   );
 
   /* ⌘↵ also works when focus is outside the editor (results pane, toolbar) */

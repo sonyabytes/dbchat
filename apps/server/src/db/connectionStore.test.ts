@@ -118,6 +118,27 @@ describe("ConnectionStoreLive", () => {
     expect(Option.getOrThrow(result)).toEqual({ password: "newpass" });
   });
 
+  test("changing dialect does not carry incompatible credentials across", async () => {
+    const { result } = await run((store) =>
+      Effect.gen(function* () {
+        const created = yield* store.create(pgInput);
+        const updated = yield* store.update(created.id, {
+          name: "warehouse",
+          dialect: "bigquery",
+          database: "acme-analytics",
+          host: "US",
+          env: "prod",
+          ssl: "require",
+          readOnlyForAi: true,
+        });
+        return { updated, secret: yield* store.getSecret(created.id) };
+      }),
+    );
+    expect(result.updated.dialect).toBe("bigquery");
+    expect(result.updated.database).toBe("acme-analytics");
+    expect(Option.isNone(result.secret)).toBe(true);
+  });
+
   test("update keeps a stored URL when an edit omits it", async () => {
     const { result } = await run((store) =>
       Effect.gen(function* () {
@@ -229,6 +250,41 @@ describe("ConnectionStoreLive", () => {
         { name: "scratch", dialect: "sqlite", env: "local", ssl: "disable", readOnlyForAi: true },
         "database",
       ));
+
+    test("bigquery needs only a project and stores optional service-account JSON", async () => {
+      const credentials = JSON.stringify({ client_email: "reader@acme.iam.gserviceaccount.com", private_key: "secret" });
+      const { result } = await run((store) =>
+        Effect.gen(function* () {
+          const created = yield* store.create({
+            name: "warehouse",
+            dialect: "bigquery",
+            database: "acme-analytics",
+            host: "US",
+            password: credentials,
+            env: "prod",
+            ssl: "require",
+            readOnlyForAi: true,
+          });
+          return { created, secret: yield* store.getSecret(created.id) };
+        }),
+      );
+      expect(result.created.port).toBe(0);
+      expect(result.created.user).toBe("");
+      expect(Option.getOrThrow(result.secret)).toEqual({ password: credentials });
+    });
+
+    test("bigquery rejects a missing project or malformed service-account JSON", async () => {
+      const base: ConnectionInput = {
+        name: "warehouse",
+        dialect: "bigquery",
+        database: "acme-analytics",
+        env: "prod",
+        ssl: "require",
+        readOnlyForAi: true,
+      };
+      await expectInvalid({ ...base, database: "" }, "database");
+      await expectInvalid({ ...base, password: "not json" }, "password");
+    });
 
     test("a url replaces the per-field requirements", async () => {
       const { result } = await run((store) =>
