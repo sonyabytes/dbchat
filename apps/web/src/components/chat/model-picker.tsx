@@ -8,7 +8,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { modelsQuery } from "@/rpc/ai";
+import { findModel, modelsQuery } from "@/rpc/ai";
 
 export { TierPill } from "./tier-pill";
 
@@ -81,7 +81,7 @@ export function ModelPicker({ value, label, onChange, disabled = false }: {
                 variant="ghost"
                 size="sm"
                 disabled={!value || isDefault}
-                onClick={() => value && setDefaultModel(value)}
+                onClick={() => value && setDefaultModel(value, findModel(catalog, value)?.provider)}
                 className="w-full justify-start"
               >
                 <Star className={cn(isDefault && "fill-brand text-brand")} />
