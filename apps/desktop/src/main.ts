@@ -7,7 +7,7 @@
  *                      scripts/dev-desktop.ts (DBCHAT_RPC_URL, default ws://127.0.0.1:4800/rpc).
  * --smoke [--smoke-out=<png>]: load, wait for /health + the connections list, screenshot, exit 0.
  */
-import { app, BrowserWindow, dialog, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -123,13 +123,16 @@ async function main(): Promise<void> {
   if (!SMOKE && !DEV_URL) {
     updater = new Updater({ repo: UPDATE_REPO, stateFile: paths.updaterState(), log, quit: () => app.quit() });
   }
+  ipcMain.handle("dbchat:check-for-updates", async () => {
+    if (updater) await updater.check({ interactive: true });
+  });
   installAppMenu({ isDev, checkForUpdates: updater ? () => void updater?.check({ interactive: true }) : undefined });
   const server = await resolveServer();
   const url = new URL(server.appUrl);
   if (SMOKE && smokePath) url.pathname = smokePath;
   url.searchParams.set("server", server.rpcUrl);
 
-  mainWindow = createMainWindow({ preload: paths.preload, stateFile: paths.windowState(), serverUrl: server.rpcUrl, show: !SMOKE });
+  mainWindow = createMainWindow({ preload: paths.preload, stateFile: paths.windowState(), serverUrl: server.rpcUrl, canCheckForUpdates: updater !== undefined, show: !SMOKE });
   syncNativeTheme(mainWindow);
   mainWindow.on("closed", () => { mainWindow = undefined; });
   nativeTheme.on("updated", () => {});
@@ -150,7 +153,7 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0 && sidecar) {
     const url = new URL(`${APP_ORIGIN}/`);
     url.searchParams.set("server", sidecar.rpcUrl);
-    mainWindow = createMainWindow({ preload: paths.preload, stateFile: paths.windowState(), serverUrl: sidecar.rpcUrl });
+    mainWindow = createMainWindow({ preload: paths.preload, stateFile: paths.windowState(), serverUrl: sidecar.rpcUrl, canCheckForUpdates: updater !== undefined });
     syncNativeTheme(mainWindow);
     void mainWindow.loadURL(url.toString());
   }

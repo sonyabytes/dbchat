@@ -29,6 +29,7 @@ export interface CreateWindowOptions {
   readonly stateFile: string;
   /** Extra CLI args for the preload (it reads `--dbchat-server=`). */
   readonly serverUrl: string;
+  readonly canCheckForUpdates?: boolean;
   readonly show?: boolean;
 }
 
@@ -50,7 +51,10 @@ export function createMainWindow(opts: CreateWindowOptions): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      additionalArguments: [`--dbchat-server=${opts.serverUrl}`],
+      additionalArguments: [
+        `--dbchat-server=${opts.serverUrl}`,
+        ...(opts.canCheckForUpdates ? ["--dbchat-can-check-for-updates"] : []),
+      ],
     },
   });
   if (saved.maximized) win.maximize();
