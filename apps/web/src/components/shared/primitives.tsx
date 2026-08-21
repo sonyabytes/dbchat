@@ -58,6 +58,17 @@ export function ToolChip({
   );
 }
 
+/* ---------- Inline loader (Beautiful UI "loader" + "shimmer") ----------
+   Unboxed spinner + shimmering label, used while the agent is between visible parts. */
+export function Loader({ label = "Working…", className }: { label?: string; className?: string }) {
+  return (
+    <div role="status" aria-live="polite" className={cn("flex items-center gap-2 py-1 text-xs", className)}>
+      <Loader2 className="size-3.5 animate-spin text-brand" />
+      <span className="shimmer-text font-medium">{label}</span>
+    </div>
+  );
+}
+
 /* ---------- Thinking state ---------- */
 export function ThinkingState({ title, steps, live = false }: { title: string; steps: string[]; live?: boolean }) {
   const [open, setOpen] = useState(live);
@@ -68,7 +79,7 @@ export function ThinkingState({ title, steps, live = false }: { title: string; s
         <span className={cn("font-medium", live ? "shimmer-text" : "text-ink-2")}>{title}</span>
         {!live && <span className="ml-auto font-mono text-[10.5px] text-ink-3">{steps.length} steps</span>}
       </button>
-      {open && (
+      {open && steps.length > 0 && (
         <ol className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-ink-2">
           {steps.map((s, i) => (
             <li key={i} className="flex gap-2">

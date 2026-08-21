@@ -1,5 +1,5 @@
 import type { ApprovalId, ChatContext, ConnectionId } from "@dbchat/contracts";
-import { ThinkingState } from "@/components/shared/primitives";
+import { Loader } from "@/components/shared/primitives";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -191,7 +191,7 @@ export function ChatView({ compact = false, threadId: threadIdProp }: { compact?
             />
           ))}
           {streaming && messages[messages.length - 1]?.role === "user" && (
-            <div className="flex flex-col gap-3"><ThinkingState live title="Working…" steps={[]} /></div>
+            <Loader />
           )}
           {(error || createError) && (
             <ErrorBanner message={error ?? createError ?? ""} onDismiss={() => { clearError(threadId); setCreateError(null); }} />
