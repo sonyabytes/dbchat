@@ -1,6 +1,7 @@
 /** Where things live in dev (repo checkout) vs packaged (.app/Contents/Resources). */
 import { app } from "electron";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const isPackaged = app.isPackaged;
@@ -19,8 +20,13 @@ export const paths = {
   sidecar: isPackaged ? join(resourcesRoot, "bin", "dbchat-server") : resolve(desktopRoot, "sidecar", "dbchat-server"),
   /** Native Claude Code CLI shipped next to the sidecar (optional). */
   claudeCli: isPackaged ? join(resourcesRoot, "bin", "claude") : resolve(desktopRoot, "sidecar", "claude"),
-  /** Per-user state: sqlite, AES key, logs. */
-  home: () => join(app.getPath("userData"), "dbchat"),
+  /**
+   * Per-user state: sqlite + AES key. Same default as the bare server
+   * (DBCHAT_HOME ?? ~/.dbchat) so dev, CLI and packaged app share history,
+   * and the path is stable across reinstalls/upgrades — schema changes go
+   * through sql migrations, never a new directory.
+   */
+  home: () => process.env.DBCHAT_HOME ?? join(homedir(), ".dbchat"),
   logs: () => join(app.getPath("userData"), "logs"),
   windowState: () => join(app.getPath("userData"), "window-state.json"),
   updaterState: () => join(app.getPath("userData"), "updater.json"),
