@@ -7,11 +7,12 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Braces, Check, Columns3, Download, Filter, Key, Link2, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, Braces, Columns3, Copy, Download, Filter, Key, Link2, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
 import type { ColumnMeta, ConnectionId, Dialect, FilterOp, FilterSpec, SortSpec } from "@dbchat/contracts";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -269,7 +270,6 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
   const [offset, setOffset] = useState(0);
   const [hidden, setHidden] = useState<string[]>([]);
   const [selectedRows, setSelectedRows] = useState<GridRecord[]>([]);
-  const [copied, setCopied] = useState<string | null>(null);
 
   const detailQuery = useQuery(schemaTableQuery(connectionId, schema, table));
   /* Changing the page size in Settings restarts paging from the top (adjust-during-render). */
@@ -301,18 +301,38 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
     setOffset(0);
   };
 
-  const copy = async (label: string, text: string) => {
+  const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(label);
-      setTimeout(() => setCopied(null), 1500);
     } catch {
-      setCopied(null);
+      /* clipboard unavailable — ignore */
     }
   };
 
   const exportRows = (rows: GridRecord[]) =>
     download(`${schema}.${table}${rows.length === pageRows.length ? `.p${Math.floor(offset / pageSize) + 1}` : ".selection"}.csv`, toCsv(rows, columnNames));
+
+  const rowContextMenu = ({ row }: { row: GridRecord }) => {
+    const targets = selectedRows.includes(row) ? selectedRows : [row];
+    const label = targets.length === 1 ? "row" : `${targets.length} rows`;
+    return (
+      <ContextMenuContent>
+          <ContextMenuItem onClick={() => void copy(JSON.stringify(targets, null, 2))}>
+            <Braces /> Copy {label} as JSON
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => void copy(toInsert(targets, columnNames, schema, table, dialect))}>
+            <Copy /> Copy {label} as INSERT
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => exportRows(targets)}>
+            <Download /> Export {label} as CSV
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={askAboutTable}>
+            <Sparkles /> Ask about this table
+          </ContextMenuItem>
+        </ContextMenuContent>
+    );
+  };
 
   const askAboutTable = () =>
     openTab(
@@ -401,21 +421,6 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
         </div>
       </div>
 
-      {selectedRows.length > 0 && view === "data" && (
-        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-brand-tint px-3 text-xs text-brand-ink">
-          <span className="font-medium">{selectedRows.length} {selectedRows.length === 1 ? "row" : "rows"} selected</span>
-          <span className="text-ink-3">·</span>
-          <button type="button" className="hover:underline" onClick={() => void copy("json", JSON.stringify(selectedRows, null, 2))}>
-            {copied === "json" ? <span className="inline-flex items-center gap-1"><Check className="size-3" /> Copied</span> : <span className="inline-flex items-center gap-1"><Braces className="size-3" /> Copy as JSON</span>}
-          </button>
-          <button type="button" className="hover:underline" onClick={() => void copy("insert", toInsert(selectedRows, columnNames, schema, table, dialect))}>
-            {copied === "insert" ? "Copied" : "Copy as INSERT"}
-          </button>
-          <button type="button" className="hover:underline" onClick={() => exportRows(selectedRows)}>Export CSV</button>
-          <button type="button" className="hover:underline" onClick={askAboutTable}>Send to chat</button>
-        </div>
-      )}
-
       {view === "data" ? (
         <div className="flex min-h-0 flex-1 flex-col bg-surface">
           {rowsQuery.error && <ErrorBanner error={rowsQuery.error} onRetry={() => void rowsQuery.refetch()} />}
@@ -432,6 +437,7 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
               loading={rowsQuery.isFetching}
               resetKey={`${offset}|${JSON.stringify(sort)}|${JSON.stringify(filters)}`}
               onSelectedRowsChange={setSelectedRows}
+              rowContextMenu={rowContextMenu}
               footer={footer}
               emptyMessage={filters.length > 0 ? "No rows match these conditions." : "This table is empty."}
               className="min-h-0 flex-1"
