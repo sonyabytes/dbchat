@@ -17,6 +17,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import type { EncryptedSecret } from "../db/secrets.ts";
+
 export interface ApprovalRow {
   readonly id: ApprovalId;
   readonly threadId: ThreadId;
@@ -56,8 +58,20 @@ export interface ChatRepoShape {
   readonly listGitRepositories: () => Effect.Effect<ReadonlyArray<GitRepository>>;
   readonly getGitRepository: (id: RepositoryId) => Effect.Effect<GitRepository, NotFound>;
   readonly insertGitRepository: (repository: GitRepository) => Effect.Effect<void>;
-  readonly updateGitRepositoryHead: (id: RepositoryId, branch: string, headCommit: string) => Effect.Effect<GitRepository, NotFound>;
+  /** Record the outcome of a sync attempt. `head` is omitted when the fetch failed and the old pin must stand. */
+  readonly updateGitRepositorySync: (id: RepositoryId, sync: GitRepositorySync) => Effect.Effect<GitRepository, NotFound>;
+  /** Encrypted token envelope; `undefined` clears it. Encryption happens in the caller. */
+  readonly setGitRepositorySecret: (id: RepositoryId, secret: EncryptedSecret | undefined) => Effect.Effect<void>;
+  readonly getGitRepositorySecret: (id: RepositoryId) => Effect.Effect<EncryptedSecret | undefined>;
   readonly deleteGitRepository: (id: RepositoryId) => Effect.Effect<void, NotFound>;
+}
+
+export interface GitRepositorySync {
+  readonly head?: { readonly branch: string; readonly headCommit: string };
+  readonly status: GitRepository["status"];
+  readonly statusMessage?: string;
+  /** Set when the remote was actually reached; local repositories leave it unset. */
+  readonly fetchedAt?: string;
 }
 
 interface ThreadRow {
@@ -96,12 +110,24 @@ interface ApprovalDbRow {
 interface GitRepositoryRow {
   id: string;
   name: string;
+  origin: string;
   path: string;
+  remote_url: string | null;
   branch: string;
   head_commit: string;
+  status: string;
+  status_message: string | null;
+  last_fetched_at: string | null;
+  has_token: number;
   created_at: string;
   updated_at: string;
 }
+
+const GIT_STATUSES: ReadonlyArray<GitRepository["status"]> = ["connected", "unauthorized", "not-found", "offline", "error"];
+const asGitStatus = (s: string): GitRepository["status"] =>
+  (GIT_STATUSES as ReadonlyArray<string>).includes(s) ? (s as GitRepository["status"]) : "error";
+
+
 
 const toSource = (row: ThreadSourceRow): SourceRef =>
   row.source_kind === "database"
@@ -151,9 +177,15 @@ const toApproval = (row: ApprovalDbRow): ApprovalRow => ({
 const toGitRepository = (row: GitRepositoryRow): GitRepository => ({
   id: row.id as RepositoryId,
   name: row.name,
+  origin: row.origin === "github" ? "github" : "local",
   path: row.path,
+  ...(row.remote_url !== null ? { remoteUrl: row.remote_url } : {}),
   branch: row.branch,
   headCommit: row.head_commit,
+  status: asGitStatus(row.status),
+  ...(row.status_message !== null ? { statusMessage: row.status_message } : {}),
+  hasToken: Number(row.has_token) !== 0,
+  ...(row.last_fetched_at !== null ? { lastFetchedAt: row.last_fetched_at } : {}),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -179,7 +211,8 @@ export const makeChatRepo = Effect.gen(function* () {
     });
 
   const getGitRepository: ChatRepoShape["getGitRepository"] = (id) =>
-    sql<GitRepositoryRow>`SELECT * FROM git_repositories WHERE id = ${id}`.pipe(
+    sql<GitRepositoryRow>`SELECT r.*, (s.repository_id IS NOT NULL) AS has_token
+      FROM git_repositories r LEFT JOIN git_repository_secrets s ON s.repository_id = r.id WHERE r.id = ${id}`.pipe(
       Effect.orDie,
       Effect.flatMap((rows) => rows[0]
         ? Effect.succeed(toGitRepository(rows[0]))
@@ -264,26 +297,52 @@ export const makeChatRepo = Effect.gen(function* () {
       sql`UPDATE approvals SET status = ${status}, result_json = ${result === undefined ? null : JSON.stringify(result)},
         resolved_at = ${now()} WHERE id = ${id}`.pipe(Effect.orDie, Effect.asVoid),
     listGitRepositories: () =>
-      sql<GitRepositoryRow>`SELECT * FROM git_repositories ORDER BY updated_at DESC`.pipe(
+      // has_token comes from the LEFT JOIN so list/get never touch ciphertext.
+      sql<GitRepositoryRow>`SELECT r.*, (s.repository_id IS NOT NULL) AS has_token
+        FROM git_repositories r LEFT JOIN git_repository_secrets s ON s.repository_id = r.id ORDER BY r.updated_at DESC`.pipe(
         Effect.orDie,
         Effect.map((rows) => rows.map(toGitRepository)),
       ),
     getGitRepository,
     insertGitRepository: (repository) =>
-      sql`INSERT INTO git_repositories (id, name, path, branch, head_commit, created_at, updated_at)
-        VALUES (${repository.id}, ${repository.name}, ${repository.path}, ${repository.branch}, ${repository.headCommit}, ${repository.createdAt}, ${repository.updatedAt})`.pipe(
+      sql`INSERT INTO git_repositories (id, name, origin, path, remote_url, branch, head_commit, status, status_message, last_fetched_at, created_at, updated_at)
+        VALUES (${repository.id}, ${repository.name}, ${repository.origin}, ${repository.path}, ${repository.remoteUrl ?? null},
+          ${repository.branch}, ${repository.headCommit}, ${repository.status}, ${repository.statusMessage ?? null},
+          ${repository.lastFetchedAt ?? null}, ${repository.createdAt}, ${repository.updatedAt})`.pipe(
         Effect.orDie,
         Effect.asVoid,
       ),
-    updateGitRepositoryHead: (id, branch, headCommit) =>
-      sql`UPDATE git_repositories SET branch = ${branch}, head_commit = ${headCommit}, updated_at = ${now()} WHERE id = ${id}`.pipe(
+    updateGitRepositorySync: (id, sync) =>
+      Effect.gen(function* () {
+        const at = now();
+        if (sync.head) {
+          yield* sql`UPDATE git_repositories SET branch = ${sync.head.branch}, head_commit = ${sync.head.headCommit},
+            status = ${sync.status}, status_message = ${sync.statusMessage ?? null},
+            last_fetched_at = COALESCE(${sync.fetchedAt ?? null}, last_fetched_at), updated_at = ${at} WHERE id = ${id}`.pipe(Effect.orDie);
+        } else {
+          yield* sql`UPDATE git_repositories SET status = ${sync.status}, status_message = ${sync.statusMessage ?? null},
+            last_fetched_at = COALESCE(${sync.fetchedAt ?? null}, last_fetched_at), updated_at = ${at} WHERE id = ${id}`.pipe(Effect.orDie);
+        }
+        return yield* getGitRepository(id);
+      }),
+    setGitRepositorySecret: (id, secret) =>
+      (secret === undefined
+        ? sql`DELETE FROM git_repository_secrets WHERE repository_id = ${id}`
+        : sql`INSERT INTO git_repository_secrets (repository_id, secret, nonce) VALUES (${id}, ${secret.secret}, ${secret.nonce})
+            ON CONFLICT(repository_id) DO UPDATE SET secret = excluded.secret, nonce = excluded.nonce`).pipe(
         Effect.orDie,
-        Effect.andThen(getGitRepository(id)),
+        Effect.asVoid,
+      ),
+    getGitRepositorySecret: (id) =>
+      sql<{ secret: string; nonce: string }>`SELECT secret, nonce FROM git_repository_secrets WHERE repository_id = ${id}`.pipe(
+        Effect.orDie,
+        Effect.map((rows) => (rows[0] ? { secret: rows[0].secret, nonce: rows[0].nonce } : undefined)),
       ),
     deleteGitRepository: (id) =>
       Effect.gen(function* () {
         yield* getGitRepository(id);
         yield* sql`DELETE FROM thread_sources WHERE source_kind = 'git' AND source_id = ${id}`.pipe(Effect.orDie);
+        yield* sql`DELETE FROM git_repository_secrets WHERE repository_id = ${id}`.pipe(Effect.orDie);
         yield* sql`DELETE FROM git_repositories WHERE id = ${id}`.pipe(Effect.orDie);
       }),
   };

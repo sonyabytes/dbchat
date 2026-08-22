@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, FolderGit2, Pencil, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import { Database, FolderGit2, GitBranch, Pencil, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import type { Connection, GitRepository, SourceRef } from "@dbchat/contracts";
 
 import { ConnectionFormDialog } from "@/components/connections/connection-form-dialog";
@@ -29,6 +29,7 @@ export function SourcePicker({ threadId, compact = false }: { threadId?: string;
   const [deleting, setDeleting] = useState<Connection | null>(null);
   const [gitDialog, setGitDialog] = useState(false);
   const [deletingRepository, setDeletingRepository] = useState<GitRepository | null>(null);
+  const [refreshing, setRefreshing] = useState<GitRepository["id"] | null>(null);
   const { data: connections = [] } = useQuery(connectionListQuery);
   const { data: repositories = [] } = useQuery(gitRepositoryListQuery);
   const { data: threads = [] } = useQuery(threadListQuery);
@@ -56,6 +57,19 @@ export function SourcePicker({ threadId, compact = false }: { threadId?: string;
     const source: SourceRef = { kind: "database", id: connection.id };
     if (!selected.some((candidate) => sameSource(candidate, source))) update([...selected, source]);
   };
+  /** Refresh failures are persisted server-side as `status`, so the list re-render is the error surface. */
+  const refresh = async (repository: GitRepository) => {
+    setRefreshing(repository.id);
+    try {
+      await gitRepositoryApi.refresh(repository.id);
+    } catch {
+      // status/statusMessage on the row explain what happened.
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: gitRepositoryKeys.list });
+      setRefreshing(null);
+    }
+  };
+
   const attachRepository = (repository: GitRepository) => {
     const source: SourceRef = { kind: "git", id: repository.id };
     if (!selected.some((candidate) => sameSource(candidate, source))) update([...selected, source]);
@@ -122,15 +136,24 @@ export function SourcePicker({ threadId, compact = false }: { threadId?: string;
                     <Field orientation="horizontal" className="min-w-0 flex-1">
                       <Checkbox id={`source-${repository.id}`} checked={checked} onCheckedChange={() => toggle(source)} disabled={save.isPending} />
                       <FieldLabel htmlFor={`source-${repository.id}`}>
-                        <FolderGit2 />
+                        {repository.origin === "github" ? <GitBranch /> : <FolderGit2 />}
                         <FieldContent className="min-w-0">
-                          <span className="truncate">{repository.name}</span>
-                          <span className="truncate font-mono text-muted-foreground">{repository.branch} · {repository.headCommit.slice(0, 8)}</span>
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate">{repository.name}</span>
+                            <GitStatusDot repository={repository} />
+                          </span>
+                          <span className="truncate font-mono text-muted-foreground">{repository.branch} · {repository.headCommit.slice(0, 8)}{repository.lastFetchedAt ? ` · fetched ${relativeTime(repository.lastFetchedAt)}` : ""}</span>
                         </FieldContent>
                       </FieldLabel>
                     </Field>
-                    <Button variant="ghost" size="icon-xs" aria-label={`Refresh ${repository.name}`} onClick={() => void gitRepositoryApi.refresh(repository.id).then(() => queryClient.invalidateQueries({ queryKey: gitRepositoryKeys.list }))}>
-                      <RefreshCw />
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`${repository.origin === "github" ? "Fetch" : "Refresh"} ${repository.name}`}
+                      disabled={refreshing === repository.id}
+                      onClick={() => void refresh(repository)}
+                    >
+                      <RefreshCw className={refreshing === repository.id ? "animate-spin" : undefined} />
                     </Button>
                     <Button variant="ghost" size="icon-xs" aria-label={`Remove ${repository.name}`} onClick={() => setDeletingRepository(repository)}>
                       <Trash2 />
@@ -156,4 +179,36 @@ export function SourcePicker({ threadId, compact = false }: { threadId?: string;
       <DeleteGitRepositoryDialog repository={deletingRepository} open={deletingRepository !== null} onOpenChange={(open) => { if (!open) setDeletingRepository(null); }} />
     </>
   );
+}
+
+const STATUS_LABEL: Record<GitRepository["status"], string> = {
+  connected: "Connected",
+  unauthorized: "Token rejected",
+  "not-found": "Repository not found",
+  offline: "Remote unreachable",
+  error: "Sync failed",
+};
+
+function GitStatusDot({ repository }: { repository: GitRepository }) {
+  if (repository.origin !== "github") return null;
+  const ok = repository.status === "connected";
+  const title = repository.statusMessage ?? STATUS_LABEL[repository.status];
+  return (
+    <span
+      role="img"
+      aria-label={STATUS_LABEL[repository.status]}
+      title={title}
+      className={cn("size-1.5 shrink-0 rounded-full", ok ? "bg-green-500" : "bg-destructive")}
+    />
+  );
+}
+
+function relativeTime(iso: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
