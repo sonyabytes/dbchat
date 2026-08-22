@@ -19,7 +19,7 @@ import {
   SqlSuggestResult,
 } from "./sql.ts";
 import { RowsPage, RowsRequest } from "./table.ts";
-import { GitRepository, GitRepositoryInput, GitRepositoryInspection } from "./source.ts";
+import { GitHubConnectionTest, GitHubConnectionTestInput, GitRepository, GitRepositoryInput, GitRepositoryInspection } from "./source.ts";
 import { RepositoryId } from "./ids.ts";
 
 export const ServerHealth = Schema.Struct({ ok: Schema.Boolean, version: Schema.String });
@@ -68,6 +68,7 @@ export const RPC = {
   gitRepositoriesCreate: "git.repositories.create",
   gitRepositoriesRefresh: "git.repositories.refresh",
   gitRepositoriesDelete: "git.repositories.delete",
+  gitGithubTest: "git.github.test",
   aiModels: "ai.models",
   aiClaudeGet: "ai.claude.get",
   aiClaudeSet: "ai.claude.set",
@@ -159,6 +160,11 @@ export class DbchatRpcs extends RpcGroup.make(
     error: Schema.Union([NotFound, ValidationError]),
   }),
   Rpc.make(RPC.gitRepositoriesDelete, { payload: Schema.Struct({ id: RepositoryId }), error: NotFound }),
+  Rpc.make(RPC.gitGithubTest, {
+    payload: GitHubConnectionTestInput,
+    success: GitHubConnectionTest,
+    error: ValidationError,
+  }),
 
   /* ---- ai ---- */
   Rpc.make(RPC.aiModels, { success: Schema.Array(ProviderModels) }),

@@ -1,5 +1,5 @@
 /** Read-only Git/dbt inspection. All reads are pinned to a resolved commit. */
-import type { GitModel, GitRepository, GitRepositoryInput } from "@dbchat/contracts";
+import type { GitModel, GitRepository, LocalGitRepositoryInput } from "@dbchat/contracts";
 import { ValidationError } from "@dbchat/contracts";
 import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
@@ -23,7 +23,7 @@ const git = (path: string, args: ReadonlyArray<string>): string =>
 const validation = (field: string, error: unknown) =>
   new ValidationError({ field, message: error instanceof Error ? error.message : String(error) });
 
-export const inspectGitInput = (input: GitRepositoryInput) =>
+export const inspectGitInput = (input: Omit<LocalGitRepositoryInput, "origin"> & { origin?: "local" }) =>
   Effect.try({
     try: () => {
       const requested = input.path.trim();

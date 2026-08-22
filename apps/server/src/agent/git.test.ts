@@ -31,9 +31,12 @@ const fixture = () => {
 describe("Git/dbt context", () => {
   test("pins a repository ref and indexes only supported model context", async () => {
     const path = fixture();
-    const inspected = await Effect.runPromise(inspectGitInput({ name: "Analytics", path }));
+    const inspected = await Effect.runPromise(inspectGitInput({ origin: "local", name: "Analytics", path }));
     const repository: GitRepository = {
       id: "repo1" as RepositoryId,
+      origin: "local",
+      status: "connected",
+      hasToken: false,
       ...inspected,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -48,7 +51,7 @@ describe("Git/dbt context", () => {
   test("rejects folders that are not Git repositories", async () => {
     const path = mkdtempSync(join(tmpdir(), "dbchat-not-git-"));
     dirs.push(path);
-    const result = await Effect.runPromise(Effect.result(inspectGitInput({ name: "Nope", path })));
+    const result = await Effect.runPromise(Effect.result(inspectGitInput({ origin: "local", name: "Nope", path })));
     expect(result._tag).toBe("Failure");
   });
 });

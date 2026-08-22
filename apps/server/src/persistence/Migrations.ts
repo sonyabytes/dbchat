@@ -4,12 +4,14 @@ import * as Migrator from "effect/unstable/sql/Migrator";
 import Migration0001 from "./Migrations/0001_Init.ts";
 import Migration0002 from "./Migrations/0002_ThreadModel.ts";
 import Migration0003 from "./Migrations/0003_ThreadSources.ts";
+import Migration0004 from "./Migrations/0004_GitRemotes.ts";
 
 /** Append new migrations here: [id, name, effect]. Ids must be increasing. */
 export const migrationEntries = [
   [1, "Init", Migration0001],
   [2, "ThreadModel", Migration0002],
   [3, "ThreadSources", Migration0003],
+  [4, "GitRemotes", Migration0004],
 ] as const;
 
 const loader = Migrator.fromRecord(

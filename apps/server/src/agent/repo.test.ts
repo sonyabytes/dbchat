@@ -72,9 +72,12 @@ test("threads can exist without a database and can attach several source kinds",
     const repository = {
       id: "repo_test" as never,
       name: "analytics",
+      origin: "local" as const,
       path: "/tmp/analytics",
       branch: "main",
       headCommit: "abc123",
+      status: "connected" as const,
+      hasToken: false,
       createdAt: now,
       updatedAt: now,
     };

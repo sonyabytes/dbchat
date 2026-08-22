@@ -1,4 +1,4 @@
-import { RPC, type GitRepositoryInput, type RepositoryId } from "@dbchat/contracts";
+import { RPC, type GitHubConnectionTestInput, type GitRepositoryInput, type RepositoryId } from "@dbchat/contracts";
 import { queryOptions } from "@tanstack/react-query";
 
 import { callRpc } from "./client";
@@ -16,4 +16,5 @@ export const gitRepositoryApi = {
   create: (input: GitRepositoryInput) => callRpc((client) => client[RPC.gitRepositoriesCreate](input)),
   refresh: (id: RepositoryId) => callRpc((client) => client[RPC.gitRepositoriesRefresh]({ id })),
   remove: (id: RepositoryId) => callRpc((client) => client[RPC.gitRepositoriesDelete]({ id })),
+  testGitHub: (input: GitHubConnectionTestInput) => callRpc((client) => client[RPC.gitGithubTest](input)),
 };
