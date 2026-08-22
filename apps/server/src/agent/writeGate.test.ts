@@ -8,7 +8,7 @@ import { forceReadOnlyDriver, makeAiWriteExecutor } from "./writeGate.ts";
 
 const thread = {
   id: "t1",
-  connectionId: "c1",
+  sources: [{ kind: "database", id: "c1" }],
   title: "test",
   createdAt: "2025-01-01T00:00:00.000Z",
   updatedAt: "2025-01-01T00:00:00.000Z",
@@ -55,14 +55,11 @@ const executor = (args: {
       Effect.succeed({
         id,
         threadId: (args.approval?.threadId ?? "t1") as never,
-        messageId: undefined,
+        connectionId: "c1" as never,
         sql: args.approval?.sql ?? "update t set a = 1",
-        rowEstimate: undefined,
         status: (args.approval?.status ?? "approved") as never,
-        resultJson: undefined,
         createdAt: "",
-        resolvedAt: undefined,
-      }),
+      } as never),
     acquireDriver: () => Effect.succeed(driver(args.calls)),
   });
 
@@ -77,7 +74,7 @@ describe("AI write gate", () => {
   test("blocks an unapproved write when Read-only for AI is enabled", async () => {
     const calls: Array<QueryOptions | undefined> = [];
     const run = executor({ readOnlyForAi: true, calls });
-    const result = await Effect.runPromise(Effect.result(run({ threadId: "t1" as never, sql: "update t set a = 1" })));
+    const result = await Effect.runPromise(Effect.result(run({ threadId: "t1" as never, connectionId: "c1" as never, sql: "update t set a = 1" })));
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.failure).toBeInstanceOf(WriteBlocked);
     expect(calls).toEqual([]);
@@ -86,7 +83,7 @@ describe("AI write gate", () => {
   test("allows an exact persisted approval and reaches the write path", async () => {
     const calls: Array<QueryOptions | undefined> = [];
     const run = executor({ readOnlyForAi: true, calls });
-    await Effect.runPromise(run({ threadId: "t1" as never, sql: "update t set a = 1", approvalId: "ap1" as never }));
+    await Effect.runPromise(run({ threadId: "t1" as never, connectionId: "c1" as never, sql: "update t set a = 1", approvalId: "ap1" as never }));
     expect(calls[0]?.readOnly).toBe(false);
   });
 
@@ -94,7 +91,7 @@ describe("AI write gate", () => {
     const calls: Array<QueryOptions | undefined> = [];
     const run = executor({ readOnlyForAi: true, calls, approval: { sql: "delete from t" } });
     const result = await Effect.runPromise(
-      Effect.result(run({ threadId: "t1" as never, sql: "update t set a = 1", approvalId: "ap1" as never })),
+      Effect.result(run({ threadId: "t1" as never, connectionId: "c1" as never, sql: "update t set a = 1", approvalId: "ap1" as never })),
     );
     expect(result._tag).toBe("Failure");
     expect(calls).toEqual([]);
@@ -103,7 +100,7 @@ describe("AI write gate", () => {
   test("allows an unapproved write when the connection policy explicitly permits it", async () => {
     const calls: Array<QueryOptions | undefined> = [];
     const run = executor({ readOnlyForAi: false, calls });
-    await Effect.runPromise(run({ threadId: "t1" as never, sql: "delete from t" }));
+    await Effect.runPromise(run({ threadId: "t1" as never, connectionId: "c1" as never, sql: "delete from t" }));
     expect(calls[0]?.readOnly).toBe(false);
   });
 
@@ -112,7 +109,7 @@ describe("AI write gate", () => {
     const sql = "commit; delete from t";
     const run = executor({ readOnlyForAi: true, calls, approval: { sql } });
     const result = await Effect.runPromise(
-      Effect.result(run({ threadId: "t1" as never, sql, approvalId: "ap1" as never })),
+      Effect.result(run({ threadId: "t1" as never, connectionId: "c1" as never, sql, approvalId: "ap1" as never })),
     );
     expect(result._tag).toBe("Failure");
     expect(calls).toEqual([]);

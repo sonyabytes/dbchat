@@ -134,8 +134,8 @@ function Sidebar() {
     <aside data-app-sidebar className="flex h-full w-[272px] shrink-0 flex-col border-r border-line bg-sidebar">
       <div className="flex h-12 items-center gap-2 px-3">
         <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" onClick={back} aria-label="All connections" />}><ArrowLeft /></TooltipTrigger>
-          <TooltipContent>All connections</TooltipContent>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-xs" onClick={back} aria-label="Chat home" />}><ArrowLeft /></TooltipTrigger>
+          <TooltipContent>Chat home</TooltipContent>
         </Tooltip>
         <DialectIcon dialect={connection.dialect} />
         <div className="min-w-0 flex-1">
@@ -178,7 +178,7 @@ function Sidebar() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
-        {section === "schema" ? <SchemaTree connectionId={connectionId} filter={q} /> : <ThreadList connectionId={connection.id} />}
+        {section === "schema" ? <SchemaTree connectionId={connectionId} filter={q} /> : <ThreadList />}
       </div>
 
       <div className="border-t border-line p-2">
@@ -207,10 +207,10 @@ function NewTabMenu() {
   const qc = useQueryClient();
   const setCurrentThread = useChat((s) => s.setCurrentThread);
   const newChat = useMutation({
-    mutationFn: () => createThread(connectionId),
+    mutationFn: () => createThread(undefined, [{ kind: "database", id: connectionId as ConnectionId }]),
     onSuccess: (t) => {
-      void qc.invalidateQueries({ queryKey: threadListKey(connectionId) });
-      setCurrentThread(connectionId, t.id);
+      void qc.invalidateQueries({ queryKey: threadListKey });
+      setCurrentThread("global", t.id);
       openTab({ id: tabIds.chat(t.id), kind: "chat", threadId: t.id, title: t.title });
     },
   });
@@ -291,7 +291,7 @@ export function Workspace() {
   useEffect(() => { setConnection(connection); return () => setConnection(null); }, [connection, setConnection]);
 
   // Chat tabs are opened before the thread has a title; adopt it as soon as the list refetches.
-  const { data: threads } = useQuery(threadListQuery(connectionId));
+  const { data: threads } = useQuery(threadListQuery);
   useEffect(() => {
     if (!threads) return;
     const { tabs: current, renameTab } = useApp.getState();

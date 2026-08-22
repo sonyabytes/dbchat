@@ -1,6 +1,7 @@
 export * from "./ids.ts";
 export * from "./errors.ts";
 export * from "./connection.ts";
+export * from "./source.ts";
 export * from "./schema.ts";
 export * from "./table.ts";
 export * from "./sql.ts";

@@ -58,7 +58,7 @@ export function CommandPalette() {
     ...schemaListQuery(connectionId as ConnectionId),
     enabled: open && inWorkspace,
   });
-  const { data: threads } = useQuery({ ...threadListQuery(connectionId), enabled: open && inWorkspace });
+  const { data: threads } = useQuery({ ...threadListQuery, enabled: open });
   const { data: saved } = useQuery({ ...savedQueriesQuery(connectionId), enabled: open && inWorkspace });
 
   const tables = useMemo(
@@ -98,7 +98,7 @@ export function CommandPalette() {
       });
     }
 
-    if (inWorkspace && !tablesOnly) {
+    if (!tablesOnly) {
       result.push({
         id: "chats",
         heading: "Chats",
@@ -162,9 +162,8 @@ export function CommandPalette() {
               id: `connection:${c.id}`,
               search: `connection ${c.name} ${c.database} ${c.host}`,
               onSelect: () => run(() => void navigate({
-                to: "/c/$connectionId/chat/$threadId",
-                params: { connectionId: c.id, threadId: "home" },
-                search: {},
+                to: "/c/$connectionId",
+                params: { connectionId: c.id },
               })),
               render: () => (
                 <>

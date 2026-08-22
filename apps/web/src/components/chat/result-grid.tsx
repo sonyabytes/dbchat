@@ -16,6 +16,7 @@ export function ResultGrid({
   pageSize = 6,
   className,
   onOpenInEditor,
+  sourceName,
 }: {
   columns: readonly ColumnMeta[];
   rows: readonly Row[];
@@ -23,6 +24,7 @@ export function ResultGrid({
   pageSize?: number;
   className?: string;
   onOpenInEditor?: (sql: string) => void;
+  sourceName?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const cols = gridColumns(columns);
@@ -35,6 +37,7 @@ export function ResultGrid({
           <Table2 className="size-3" />
           <span className="font-medium text-ink-2">Query result</span>
           <span>· {rows.length.toLocaleString()} {rows.length === 1 ? "row" : "rows"}</span>
+          {sourceName ? <span className="truncate">· {sourceName}</span> : null}
           <div className="ml-auto flex items-center gap-0.5">
             {sql && onOpenInEditor && (
               <Button variant="ghost" size="icon-xs" aria-label="Open in editor" onClick={() => onOpenInEditor(sql)}>

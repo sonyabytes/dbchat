@@ -127,7 +127,7 @@ export function reduceEvent(messages: UiMessage[], threadId: string, ev: ChatEve
       const withMsg = upsertAssistant(messages, threadId, ev.messageId);
       return patch(withMsg, ev.messageId, (m) => ({
         ...m,
-        parts: [...m.parts, { _tag: "ResultTable", columns: ev.columns, rows: ev.rows, sql: ev.sql }],
+        parts: [...m.parts, { _tag: "ResultTable", columns: ev.columns, rows: ev.rows, sql: ev.sql, ...(ev.source ? { source: ev.source } : {}) }],
       }));
     }
     case "ApprovalRequested": {
@@ -142,6 +142,7 @@ export function reduceEvent(messages: UiMessage[], threadId: string, ev: ChatEve
             sql: ev.sql,
             status: "pending",
             ...(ev.rowEstimate === undefined ? {} : { rowEstimate: ev.rowEstimate }),
+            ...(ev.source ? { source: ev.source } : {}),
           },
         ],
       }));

@@ -8,7 +8,8 @@ import {
   type ApprovalId,
   type ChatEvent,
   type ChatSendInput,
-  type Connection,
+  type ConnectionId,
+  type GitRepository,
   type Message,
   type MessageId,
   type Thread,
@@ -31,7 +32,7 @@ import { startOpenCodeTurn } from "./opencodeDriver.ts";
 import { buildSystemPrompt, buildUserPrompt, schemaSummary } from "./prompt.ts";
 import { providerSession, setProviderSession } from "./providerSessions.ts";
 import { type ChatRepoShape, newId } from "./repo.ts";
-import { DBCHAT_TOOL_NAMES, invokeDbchatTool, makeDbchatMcpServer, type ProposeWriteOutcome, type ToolContext } from "./tools.ts";
+import { DBCHAT_TOOL_NAMES, invokeDbchatTool, makeDbchatMcpServer, type ProposeWriteOutcome, type ToolContext, type ToolDatabase } from "./tools.ts";
 import type { AiWriteRequest, AiWriteResult } from "./writeGate.ts";
 
 export const APPROVAL_TIMEOUT = Duration.minutes(10);
@@ -47,9 +48,10 @@ export interface PendingApproval {
 export interface SessionDeps {
   readonly repo: ChatRepoShape;
   readonly hub: ChatHub;
-  readonly acquireDriver: Effect.Effect<Driver, unknown>;
+  readonly databases: ReadonlyArray<ToolDatabase>;
+  readonly repositories: ReadonlyArray<GitRepository>;
   /** Fresh connection policy; true means a persisted approval is required. */
-  readonly writeApprovalRequired: Effect.Effect<boolean>;
+  readonly writeApprovalRequired: (connectionId: ConnectionId) => Effect.Effect<boolean>;
   /** Server-owned capability; the only AI path that may set driver readOnly:false. */
   readonly executeWrite: (request: AiWriteRequest) => Effect.Effect<AiWriteResult, unknown>;
   readonly pendingApprovals: Map<ApprovalId, PendingApproval>;
@@ -125,13 +127,12 @@ export const buildQueryOptions = (args: {
 export const runTurn = (args: {
   deps: SessionDeps;
   thread: Thread;
-  connection: Connection;
   input: ChatSendInput;
   messageId: MessageId;
   onQuery: (q: Pick<AgentTurnHandle, "interrupt">) => void;
 }) =>
   Effect.gen(function* () {
-    const { deps, connection, input, messageId } = args;
+    const { deps, input, messageId } = args;
     let thread = args.thread;
     const publish = (e: ChatEvent) => deps.hub.publish(thread.id, e);
     const run = Effect.runPromiseWith(yield* Effect.context<never>());
@@ -149,22 +150,26 @@ export const runTurn = (args: {
     if (count === 0) yield* deps.repo.setThreadTitle(thread.id, input.text.replace(/\s+/g, " ").trim().slice(0, 60) || "New chat");
     yield* publish({ _tag: "UserMessage", message: userMessage });
 
-    // 2. Schema summary (best effort).
-    const driverResult = yield* Effect.result(deps.acquireDriver);
-    let schema = "";
-    let dialect: string = connection.dialect;
-    if (driverResult._tag === "Success") {
-      dialect = driverResult.success.dialect;
-      schema = yield* loadSchemaSummary(thread.connectionId, driverResult.success).pipe(
-        Effect.catch((e) => deps.log("schema summary failed", { error: String(e) }).pipe(Effect.as(""))),
-      );
-    } else {
-      yield* deps.log("driver unavailable for thread", { threadId: thread.id, error: String(driverResult.failure) });
-    }
+    // 2. Best-effort schema summaries for every attached database.
+    const databases = yield* Effect.forEach(
+      deps.databases,
+      ({ connection, driver }) => Effect.gen(function* () {
+        const result = yield* Effect.result(driver);
+        if (result._tag === "Failure") {
+          yield* deps.log("driver unavailable for thread source", { threadId: thread.id, connectionId: connection.id, error: String(result.failure) });
+          return { connection, dialect: connection.dialect, schema: "" };
+        }
+        const schema = yield* loadSchemaSummary(connection.id, result.success).pipe(
+          Effect.catch((error) => deps.log("schema summary failed", { connectionId: connection.id, error: String(error) }).pipe(Effect.as(""))),
+        );
+        return { connection, dialect: result.success.dialect, schema };
+      }),
+      { concurrency: 4 },
+    );
 
     const provider = findModel(deps.model)?.provider ?? "anthropic";
     const userPrompt = buildUserPrompt(input.text, input.context);
-    const systemPrompt = buildSystemPrompt({ connection, dialect, schema });
+    const systemPrompt = buildSystemPrompt({ databases, repositories: deps.repositories });
     const saveProviderSession = (sessionId: string) => Effect.gen(function* () {
       const stored = setProviderSession(thread.sdkSessionId, provider, sessionId);
       if (stored === thread.sdkSessionId) return;
@@ -173,12 +178,12 @@ export const runTurn = (args: {
     });
 
     const makeToolContext = (emit: (event: ChatEvent) => Effect.Effect<void>): ToolContext => ({
-      connectionId: thread.connectionId,
+      databases: deps.databases,
+      repositories: deps.repositories,
       messageId,
       run,
-      driver: deps.acquireDriver,
       emit,
-      proposeWrite: ({ sql, estimatedRows }) => proposeWrite({ deps, thread, messageId, sql, estimatedRows, emit }),
+      proposeWrite: ({ connectionId, sql, estimatedRows }) => proposeWrite({ deps, thread, connectionId, messageId, sql, estimatedRows, emit }),
     });
     const exposeInterrupt = (handle: Pick<AgentTurnHandle, "interrupt">) => {
       args.onQuery({
@@ -327,20 +332,21 @@ export const runTurn = (args: {
 export const proposeWrite = (args: {
   deps: SessionDeps;
   thread: Thread;
+  connectionId: ConnectionId;
   messageId: MessageId;
   sql: string;
   estimatedRows: number | undefined;
   emit: (e: ChatEvent) => Effect.Effect<void>;
 }): Effect.Effect<ProposeWriteOutcome> =>
   Effect.gen(function* () {
-    const { deps, thread, messageId, sql, emit } = args;
-    const approvalRequired = yield* deps.writeApprovalRequired;
+    const { deps, thread, connectionId, messageId, sql, emit } = args;
+    const approvalRequired = yield* deps.writeApprovalRequired(connectionId);
 
     // The connection policy is re-checked by executeWrite immediately before
     // reaching the raw driver. This first check only decides whether to show an
     // approval card.
     if (!approvalRequired) {
-      const direct = yield* Effect.result(deps.executeWrite({ threadId: thread.id, sql }));
+      const direct = yield* Effect.result(deps.executeWrite({ threadId: thread.id, connectionId, sql }));
       if (direct._tag === "Failure") {
         const error = direct.failure instanceof Error ? direct.failure.message : String(direct.failure);
         return { status: "failed", error } as const;
@@ -355,6 +361,7 @@ export const proposeWrite = (args: {
     yield* deps.repo.createApproval({
       id: approvalId,
       threadId: thread.id,
+      connectionId,
       messageId,
       sql,
       ...(args.estimatedRows !== undefined ? { rowEstimate: args.estimatedRows } : {}),
@@ -364,6 +371,7 @@ export const proposeWrite = (args: {
       messageId,
       approvalId,
       sql,
+      source: { kind: "database", id: connectionId },
       ...(args.estimatedRows !== undefined ? { rowEstimate: args.estimatedRows } : {}),
     });
 
@@ -383,7 +391,7 @@ export const proposeWrite = (args: {
     yield* emit({ _tag: "ApprovalResolved", approvalId, status: "approved" });
 
     const result = yield* Effect.result(
-      deps.executeWrite({ threadId: thread.id, sql, approvalId }),
+      deps.executeWrite({ threadId: thread.id, connectionId, sql, approvalId }),
     );
     if (result._tag === "Failure") {
       const error = result.failure instanceof Error ? result.failure.message : String(result.failure);

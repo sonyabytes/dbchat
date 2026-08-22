@@ -11,11 +11,21 @@ export const chatHandlers = Effect.gen(function* () {
   const store = yield* ConnectionStore;
   const repo = yield* ChatRepo;
 
+  const validateSources = (sources: Parameters<typeof repo.setThreadSources>[1]) =>
+    Effect.gen(function* () {
+      for (const source of sources) {
+        if (source.kind === "database") yield* store.get(source.id);
+        else yield* repo.getGitRepository(source.id);
+      }
+    });
+
   return {
-    [RPC.chatThreadsList]: ({ connectionId }) => repo.listThreads(connectionId),
-    [RPC.chatThreadsCreate]: ({ connectionId, title }) =>
-      store.get(connectionId).pipe(Effect.andThen(repo.createThread(connectionId, title ?? "New chat"))),
+    [RPC.chatThreadsList]: () => repo.listThreads(),
+    [RPC.chatThreadsCreate]: ({ title, sources = [] }) =>
+      validateSources(sources).pipe(Effect.andThen(repo.createThread(title ?? "New chat", sources))),
     [RPC.chatThreadsDelete]: ({ threadId }) => repo.deleteThread(threadId),
+    [RPC.chatThreadSourcesSet]: ({ threadId, sources }) =>
+      validateSources(sources).pipe(Effect.andThen(repo.setThreadSources(threadId, sources))),
     [RPC.chatMessagesList]: ({ threadId }) => repo.getThread(threadId).pipe(Effect.andThen(repo.listMessages(threadId))),
     [RPC.chatSend]: (input) => agent.send(input),
     [RPC.chatAbort]: ({ threadId }) => agent.abort(threadId),

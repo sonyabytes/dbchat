@@ -24,7 +24,7 @@ import { useSettings } from "@/lib/settings";
 import { tabIds, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { tableRowsQuery } from "@/rpc/table";
-import { rpcErrorMessage, rpcErrorTag, schemaTableQuery } from "@/rpc/queries";
+import { connectionListQuery, rpcErrorMessage, rpcErrorTag, schemaTableQuery } from "@/rpc/queries";
 
 const NO_COLUMNS: ReadonlyArray<ColumnMeta> = [];
 
@@ -255,9 +255,23 @@ function ErrorBanner({ error, onRetry }: { error: unknown; onRetry?: () => void 
 
 /* ---------------- Screen ---------------- */
 
-export function TableView({ schema, table }: { schema: string; table: string }) {
-  const connection = useApp((s) => s.connection);
-  const connectionId = (connection?.id ?? "") as ConnectionId;
+export function TableView({
+  schema,
+  table,
+  connectionId: connectionIdProp,
+  onAskAboutTable,
+}: {
+  schema: string;
+  table: string;
+  connectionId?: string;
+  onAskAboutTable?: (context: string) => void;
+}) {
+  const workspaceConnection = useApp((s) => s.connection);
+  const { data: connections = [] } = useQuery(connectionListQuery);
+  const connectionId = (connectionIdProp ?? workspaceConnection?.id ?? "") as ConnectionId;
+  const connection = workspaceConnection?.id === connectionId
+    ? workspaceConnection
+    : connections.find((candidate) => candidate.id === connectionId);
   const dialect: Dialect = connection?.dialect ?? "postgres";
   const queryClient = useQueryClient();
   const openTab = useOpenTab();
@@ -334,11 +348,17 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
     );
   };
 
-  const askAboutTable = () =>
+  const askAboutTable = () => {
+    const context = `${schema}.${table}`;
+    if (onAskAboutTable) {
+      onAskAboutTable(context);
+      return;
+    }
     openTab(
       { id: tabIds.chat("home"), kind: "chat", threadId: "home", title: `Ask about ${table}` },
-      { context: `${schema}.${table}` },
+      { context },
     );
+  };
 
   const from = total === 0 ? 0 : offset + 1;
   const to = offset + (page?.rows.length ?? 0);
@@ -360,7 +380,7 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
 
   return (
     <div className="@container flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+      <div className="flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-line px-3 py-1 @3xl:h-10 @3xl:flex-nowrap @3xl:py-0">
         <span className="font-mono text-xs text-ink-3">{schema}.</span>
         <span className="-ml-2 font-medium">{table}</span>
         {total !== undefined && <CountBadge n={total} />}
@@ -370,7 +390,7 @@ export function TableView({ schema, table }: { schema: string; table: string }) 
             <TabsTrigger value="structure" className="h-6 px-2 text-xs">Structure</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="flex w-full min-w-0 items-center justify-end gap-1 @3xl:ml-auto @3xl:w-auto">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-ink-3" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter page" className="h-7 w-32 pl-7 text-xs @3xl:w-48" />

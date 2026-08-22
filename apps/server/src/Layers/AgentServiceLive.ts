@@ -2,7 +2,7 @@
  * AgentService backed by Claude Code, Codex, and OpenCode drivers. All three
  * share the guarded database tool layer and approval flow in src/agent/*.
  */
-import { AgentError, type ApprovalId, type ChatEvent, type MessageId, NotFound, type ThreadId } from "@dbchat/contracts";
+import { AgentError, type ApprovalId, type ChatEvent, type Connection, type GitRepository, type MessageId, NotFound, type ThreadId } from "@dbchat/contracts";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as Context from "effect/Context";
@@ -59,12 +59,18 @@ export const AgentServiceLive = Layer.effect(
       acquireDriver: registry.acquire,
     });
 
-    const deps = (threadId: ThreadId, connectionId: Parameters<typeof registry.acquire>[0], model: string) => ({
+    const deps = (
+      threadId: ThreadId,
+      databases: ReadonlyArray<{ connection: Connection; driver: Effect.Effect<Driver, unknown> }>,
+      repositories: ReadonlyArray<GitRepository>,
+      model: string,
+    ) => ({
       repo,
       hub,
-      acquireDriver: registry.acquire(connectionId).pipe(Effect.map(forceReadOnlyDriver)) as Effect.Effect<Driver, unknown>,
+      databases,
+      repositories,
       // Fail closed if the connection policy cannot be loaded.
-      writeApprovalRequired: store.get(connectionId).pipe(
+      writeApprovalRequired: (connectionId: Parameters<typeof registry.acquire>[0]) => store.get(connectionId).pipe(
         Effect.map((connection) => connection.readOnlyForAi),
         Effect.catch(() => Effect.succeed(true)),
       ),
@@ -80,7 +86,15 @@ export const AgentServiceLive = Layer.effect(
       Stream.callback<ChatEvent, NotFound | AgentError>((queue) =>
         Effect.gen(function* () {
           const thread = yield* repo.getThread(input.threadId);
-          const connection = yield* store.get(thread.connectionId);
+          const databaseSources = thread.sources.filter((source) => source.kind === "database");
+          const gitSources = thread.sources.filter((source) => source.kind === "git");
+          const databases = yield* Effect.forEach(databaseSources, (source) =>
+            store.get(source.id).pipe(Effect.map((connection) => ({
+              connection,
+              driver: registry.acquire(source.id).pipe(Effect.map(forceReadOnlyDriver)) as Effect.Effect<Driver, unknown>,
+            }))),
+          );
+          const repositories = yield* Effect.forEach(gitSources, (source) => repo.getGitRepository(source.id));
           // input.model > thread.model > DBCHAT_MODEL, and it must be in the catalog.
           const resolved = resolveModel({
             requested: input.model,
@@ -119,9 +133,8 @@ export const AgentServiceLive = Layer.effect(
           // Persist before the turn so a reload reopens the picker on this model.
           if (thread.model !== model) yield* repo.setThreadModel(thread.id, model);
           const turn = runTurn({
-            deps: deps(thread.id, thread.connectionId, model),
+            deps: deps(thread.id, databases, repositories, model),
             thread: { ...thread, model },
-            connection,
             input,
             messageId,
             onQuery: (q) => activeTurns.set(thread.id, { messageId, query: q }),

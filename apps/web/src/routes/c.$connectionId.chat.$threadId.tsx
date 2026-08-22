@@ -14,8 +14,8 @@ interface ChatSearch {
 }
 
 function ChatRoute() {
-  const { connectionId, threadId } = Route.useParams();
-  const { data: threads } = useQuery(threadListQuery(connectionId));
+  const { threadId } = Route.useParams();
+  const { data: threads } = useQuery(threadListQuery);
   const existing = useApp((s) => s.tabs.find((t) => t.id === tabIds.chat(threadId)));
   const serverTitle = threads?.find((t) => t.id === threadId)?.title;
   const title = serverTitle ?? (existing?.kind === "chat" ? existing.title : "New chat");

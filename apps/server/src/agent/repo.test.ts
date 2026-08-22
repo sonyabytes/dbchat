@@ -28,7 +28,7 @@ const withRepo = <A, E>(f: (repo: ChatRepoShape) => Effect.Effect<A, E>): Promis
 test("a new thread has no model until one is set", async () => {
   const thread = await withRepo((repo) =>
     Effect.gen(function* () {
-      const created = yield* repo.createThread(connectionId, "hi");
+      const created = yield* repo.createThread("hi", [{ kind: "database", id: connectionId }]);
       return yield* repo.getThread(created.id);
     }),
   );
@@ -38,12 +38,12 @@ test("a new thread has no model until one is set", async () => {
 test("setThreadModel persists and survives a re-read (migration 0002 column)", async () => {
   const out = await withRepo((repo) =>
     Effect.gen(function* () {
-      const created = yield* repo.createThread(connectionId, "hi");
+      const created = yield* repo.createThread("hi", [{ kind: "database", id: connectionId }]);
       yield* repo.setThreadModel(created.id, "claude-opus-5");
       const afterSet = yield* repo.getThread(created.id);
       yield* repo.setThreadModel(created.id, "claude-haiku-4-5");
       const afterSwitch = yield* repo.getThread(created.id);
-      const listed = yield* repo.listThreads(connectionId);
+      const listed = yield* repo.listThreads();
       return { afterSet, afterSwitch, listed };
     }),
   );
@@ -55,7 +55,7 @@ test("setThreadModel persists and survives a re-read (migration 0002 column)", a
 test("the model is independent of the sdk session id", async () => {
   const thread = await withRepo((repo) =>
     Effect.gen(function* () {
-      const created = yield* repo.createThread(connectionId, "hi");
+      const created = yield* repo.createThread("hi", [{ kind: "database", id: connectionId }]);
       yield* repo.setThreadModel(created.id, "claude-opus-5");
       yield* repo.setSdkSessionId(created.id, "sess_1");
       yield* repo.setThreadTitle(created.id, "renamed");
@@ -63,4 +63,31 @@ test("the model is independent of the sdk session id", async () => {
     }),
   );
   expect(thread).toMatchObject({ model: "claude-opus-5", sdkSessionId: "sess_1", title: "renamed" });
+});
+
+test("threads can exist without a database and can attach several source kinds", async () => {
+  const out = await withRepo((repo) => Effect.gen(function* () {
+    const thread = yield* repo.createThread("general research", []);
+    const now = new Date().toISOString();
+    const repository = {
+      id: "repo_test" as never,
+      name: "analytics",
+      path: "/tmp/analytics",
+      branch: "main",
+      headCommit: "abc123",
+      createdAt: now,
+      updatedAt: now,
+    };
+    yield* repo.insertGitRepository(repository);
+    const updated = yield* repo.setThreadSources(thread.id, [
+      { kind: "database", id: connectionId },
+      { kind: "git", id: repository.id },
+    ]);
+    return { thread, updated };
+  }));
+  expect(out.thread.sources).toEqual([]);
+  expect(out.updated.sources).toEqual([
+    { kind: "database", id: connectionId },
+    { kind: "git", id: "repo_test" as never },
+  ]);
 });

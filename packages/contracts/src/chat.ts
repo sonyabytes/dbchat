@@ -1,11 +1,12 @@
 import * as Schema from "effect/Schema";
-import { ApprovalId, ConnectionId, IsoDateTime, MessageId, ThreadId, ToolCallId } from "./ids.ts";
+import { ApprovalId, IsoDateTime, MessageId, ThreadId, ToolCallId } from "./ids.ts";
 import { ColumnMeta } from "./schema.ts";
+import { SourceRef } from "./source.ts";
 import { Row } from "./table.ts";
 
 export const Thread = Schema.Struct({
   id: ThreadId,
-  connectionId: ConnectionId,
+  sources: Schema.Array(SourceRef),
   title: Schema.String,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -40,6 +41,7 @@ export const ResultTablePart = Schema.Struct({
   columns: Schema.Array(ColumnMeta),
   rows: Schema.Array(Row),
   sql: Schema.String,
+  source: Schema.optional(SourceRef),
 });
 export const ApprovalPart = Schema.Struct({
   _tag: Schema.Literal("Approval"),
@@ -47,6 +49,7 @@ export const ApprovalPart = Schema.Struct({
   sql: Schema.String,
   rowEstimate: Schema.optional(Schema.Number),
   status: ApprovalStatus,
+  source: Schema.optional(SourceRef),
 });
 
 export const MessagePart = Schema.Union([TextPart, ThinkingPart, ToolCallPart, ResultTablePart, ApprovalPart]);
@@ -94,6 +97,7 @@ export const ChatEvent = Schema.Union([
     columns: Schema.Array(ColumnMeta),
     rows: Schema.Array(Row),
     sql: Schema.String,
+    source: Schema.optional(SourceRef),
   }),
   Schema.Struct({
     _tag: Schema.Literal("ApprovalRequested"),
@@ -101,6 +105,7 @@ export const ChatEvent = Schema.Union([
     approvalId: ApprovalId,
     sql: Schema.String,
     rowEstimate: Schema.optional(Schema.Number),
+    source: Schema.optional(SourceRef),
   }),
   Schema.Struct({ _tag: Schema.Literal("ApprovalResolved"), approvalId: ApprovalId, status: ApprovalStatus }),
   Schema.Struct({
@@ -130,10 +135,16 @@ export const ChatSendInput = Schema.Struct({
 export type ChatSendInput = typeof ChatSendInput.Type;
 
 export const ThreadCreateInput = Schema.Struct({
-  connectionId: ConnectionId,
   title: Schema.optional(Schema.String),
+  sources: Schema.optional(Schema.Array(SourceRef)),
 });
 export type ThreadCreateInput = typeof ThreadCreateInput.Type;
+
+export const ThreadSourcesSetInput = Schema.Struct({
+  threadId: ThreadId,
+  sources: Schema.Array(SourceRef),
+});
+export type ThreadSourcesSetInput = typeof ThreadSourcesSetInput.Type;
 
 export const ApprovalResolveInput = Schema.Struct({
   approvalId: ApprovalId,

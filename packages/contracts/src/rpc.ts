@@ -3,7 +3,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { ClaudeRuntimeSettings, ClaudeRuntimeStatus, ProviderModels } from "./ai.ts";
-import { ApprovalResolveInput, ChatEvent, ChatSendInput, Message, Thread, ThreadCreateInput } from "./chat.ts";
+import { ApprovalResolveInput, ChatEvent, ChatSendInput, Message, Thread, ThreadCreateInput, ThreadSourcesSetInput } from "./chat.ts";
 import { Connection, ConnectionCredentials, ConnectionInput, ConnectionStatus, ConnectionTestResult } from "./connection.ts";
 import { AgentError, ConnectionError, DriverError, NotFound, SqlError, ValidationError, WriteBlocked } from "./errors.ts";
 import { ConnectionId, QueryId, RunId, ThreadId } from "./ids.ts";
@@ -19,6 +19,8 @@ import {
   SqlSuggestResult,
 } from "./sql.ts";
 import { RowsPage, RowsRequest } from "./table.ts";
+import { GitRepository, GitRepositoryInput, GitRepositoryInspection } from "./source.ts";
+import { RepositoryId } from "./ids.ts";
 
 export const ServerHealth = Schema.Struct({ ok: Schema.Boolean, version: Schema.String });
 export type ServerHealth = typeof ServerHealth.Type;
@@ -56,11 +58,16 @@ export const RPC = {
   chatThreadsList: "chat.threads.list",
   chatThreadsCreate: "chat.threads.create",
   chatThreadsDelete: "chat.threads.delete",
+  chatThreadSourcesSet: "chat.thread.sources.set",
   chatMessagesList: "chat.messages.list",
   chatSend: "chat.send",
   chatAbort: "chat.abort",
   chatApprovalResolve: "chat.approval.resolve",
   chatEvents: "chat.events",
+  gitRepositoriesList: "git.repositories.list",
+  gitRepositoriesCreate: "git.repositories.create",
+  gitRepositoriesRefresh: "git.repositories.refresh",
+  gitRepositoriesDelete: "git.repositories.delete",
   aiModels: "ai.models",
   aiClaudeGet: "ai.claude.get",
   aiClaudeSet: "ai.claude.set",
@@ -116,9 +123,10 @@ export class DbchatRpcs extends RpcGroup.make(
   Rpc.make(RPC.sqlSuggest, { payload: SqlSuggestRequest, success: SqlSuggestResult, error: AgentError }),
 
   /* ---- chat ---- */
-  Rpc.make(RPC.chatThreadsList, { payload: ByConnection, success: Schema.Array(Thread) }),
+  Rpc.make(RPC.chatThreadsList, { success: Schema.Array(Thread) }),
   Rpc.make(RPC.chatThreadsCreate, { payload: ThreadCreateInput, success: Thread, error: NotFound }),
   Rpc.make(RPC.chatThreadsDelete, { payload: ByThread, error: NotFound }),
+  Rpc.make(RPC.chatThreadSourcesSet, { payload: ThreadSourcesSetInput, success: Thread, error: NotFound }),
   Rpc.make(RPC.chatMessagesList, { payload: ByThread, success: Schema.Array(Message), error: NotFound }),
   Rpc.make(RPC.chatSend, {
     payload: ChatSendInput,
@@ -137,6 +145,20 @@ export class DbchatRpcs extends RpcGroup.make(
     error: NotFound,
     stream: true,
   }),
+
+  /* ---- Git context sources ---- */
+  Rpc.make(RPC.gitRepositoriesList, { success: Schema.Array(GitRepository) }),
+  Rpc.make(RPC.gitRepositoriesCreate, {
+    payload: GitRepositoryInput,
+    success: GitRepositoryInspection,
+    error: ValidationError,
+  }),
+  Rpc.make(RPC.gitRepositoriesRefresh, {
+    payload: Schema.Struct({ id: RepositoryId }),
+    success: GitRepositoryInspection,
+    error: Schema.Union([NotFound, ValidationError]),
+  }),
+  Rpc.make(RPC.gitRepositoriesDelete, { payload: Schema.Struct({ id: RepositoryId }), error: NotFound }),
 
   /* ---- ai ---- */
   Rpc.make(RPC.aiModels, { success: Schema.Array(ProviderModels) }),

@@ -21,6 +21,7 @@ import { collectQuery } from "./tools.ts";
 
 export interface AiWriteRequest {
   readonly threadId: ThreadId;
+  readonly connectionId: ConnectionId;
   readonly sql: string;
   readonly approvalId?: ApprovalId;
 }
@@ -53,11 +54,17 @@ export const forceReadOnlyDriver = (driver: Driver): Driver => ({
 export const makeAiWriteExecutor = (deps: AiWriteGateDeps) => (request: AiWriteRequest) =>
   Effect.gen(function* () {
     const thread = yield* deps.getThread(request.threadId);
-    const connection = yield* deps.getConnection(thread.connectionId);
+    if (!thread.sources.some((source) => source.kind === "database" && source.id === request.connectionId)) {
+      return yield* Effect.fail(new WriteBlocked({
+        sql: request.sql,
+        reason: "the selected database is not attached to this conversation",
+      }));
+    }
+    const connection = yield* deps.getConnection(request.connectionId);
 
     if (request.approvalId !== undefined) {
       const approval = yield* deps.getApproval(request.approvalId);
-      if (approval.threadId !== thread.id || approval.sql !== request.sql || approval.status !== "approved") {
+      if (approval.threadId !== thread.id || approval.connectionId !== request.connectionId || approval.sql !== request.sql || approval.status !== "approved") {
         return yield* Effect.fail(
           new WriteBlocked({
             sql: request.sql,
@@ -74,7 +81,7 @@ export const makeAiWriteExecutor = (deps: AiWriteGateDeps) => (request: AiWriteR
       );
     }
 
-    const driver = yield* deps.acquireDriver(thread.connectionId);
+    const driver = yield* deps.acquireDriver(request.connectionId);
     const statements = classifyStatements(request.sql, driver.dialect);
     if (statements.length !== 1 || (statements[0]?.kind !== "write" && statements[0]?.kind !== "ddl")) {
       return yield* Effect.fail(

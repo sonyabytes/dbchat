@@ -1,26 +1,26 @@
-/**
- * ChatRepo: sqlite persistence for threads / messages / approvals
- * (tables from migration 0001_Init). Pure data access, no agent logic.
- */
+/** SQLite persistence for conversations, source attachments, and approvals. */
 import {
   type ApprovalId,
   type ApprovalStatus,
   type ConnectionId,
+  type GitRepository,
   type Message,
   type MessageId,
   type MessagePart,
   type MessageRole,
   NotFound,
+  type RepositoryId,
+  type SourceRef,
   type Thread,
   type ThreadId,
 } from "@dbchat/contracts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlError } from "effect/unstable/sql/SqlError";
 
 export interface ApprovalRow {
   readonly id: ApprovalId;
   readonly threadId: ThreadId;
+  readonly connectionId: ConnectionId | undefined;
   readonly messageId: MessageId | undefined;
   readonly sql: string;
   readonly rowEstimate: number | undefined;
@@ -31,13 +31,13 @@ export interface ApprovalRow {
 }
 
 export interface ChatRepoShape {
-  readonly listThreads: (connectionId: ConnectionId) => Effect.Effect<ReadonlyArray<Thread>>;
+  readonly listThreads: () => Effect.Effect<ReadonlyArray<Thread>>;
   readonly getThread: (id: ThreadId) => Effect.Effect<Thread, NotFound>;
-  readonly createThread: (connectionId: ConnectionId, title: string) => Effect.Effect<Thread, NotFound>;
+  readonly createThread: (title: string, sources: ReadonlyArray<SourceRef>) => Effect.Effect<Thread, NotFound>;
+  readonly setThreadSources: (id: ThreadId, sources: ReadonlyArray<SourceRef>) => Effect.Effect<Thread, NotFound>;
   readonly deleteThread: (id: ThreadId) => Effect.Effect<void, NotFound>;
   readonly setThreadTitle: (id: ThreadId, title: string) => Effect.Effect<void>;
   readonly setSdkSessionId: (id: ThreadId, sdkSessionId: string) => Effect.Effect<void>;
-  /** Remembers the model a thread last ran on. */
   readonly setThreadModel: (id: ThreadId, model: string) => Effect.Effect<void>;
   readonly touchThread: (id: ThreadId) => Effect.Effect<void>;
   readonly listMessages: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<Message>>;
@@ -46,22 +46,33 @@ export interface ChatRepoShape {
   readonly createApproval: (a: {
     id: ApprovalId;
     threadId: ThreadId;
+    connectionId: ConnectionId;
     messageId: MessageId;
     sql: string;
     rowEstimate?: number;
   }) => Effect.Effect<void>;
   readonly getApproval: (id: ApprovalId) => Effect.Effect<ApprovalRow, NotFound>;
   readonly setApprovalStatus: (id: ApprovalId, status: ApprovalStatus, result?: unknown) => Effect.Effect<void>;
+  readonly listGitRepositories: () => Effect.Effect<ReadonlyArray<GitRepository>>;
+  readonly getGitRepository: (id: RepositoryId) => Effect.Effect<GitRepository, NotFound>;
+  readonly insertGitRepository: (repository: GitRepository) => Effect.Effect<void>;
+  readonly updateGitRepositoryHead: (id: RepositoryId, branch: string, headCommit: string) => Effect.Effect<GitRepository, NotFound>;
+  readonly deleteGitRepository: (id: RepositoryId) => Effect.Effect<void, NotFound>;
 }
 
 interface ThreadRow {
   id: string;
-  connection_id: string;
   title: string;
   sdk_session_id: string | null;
   model: string | null;
   created_at: string;
   updated_at: string;
+}
+interface ThreadSourceRow {
+  thread_id: string;
+  source_kind: "database" | "git";
+  source_id: string;
+  position: number;
 }
 interface MessageRow {
   id: string;
@@ -73,6 +84,7 @@ interface MessageRow {
 interface ApprovalDbRow {
   id: string;
   thread_id: string;
+  connection_id: string | null;
   message_id: string | null;
   sql: string;
   row_estimate: number | null;
@@ -81,44 +93,69 @@ interface ApprovalDbRow {
   created_at: string;
   resolved_at: string | null;
 }
+interface GitRepositoryRow {
+  id: string;
+  name: string;
+  path: string;
+  branch: string;
+  head_commit: string;
+  created_at: string;
+  updated_at: string;
+}
 
-const toThread = (r: ThreadRow): Thread => ({
-  id: r.id as ThreadId,
-  connectionId: r.connection_id as ConnectionId,
-  title: r.title,
-  createdAt: r.created_at,
-  updatedAt: r.updated_at,
-  ...(r.sdk_session_id ? { sdkSessionId: r.sdk_session_id } : {}),
-  ...(r.model ? { model: r.model } : {}),
-});
+const toSource = (row: ThreadSourceRow): SourceRef =>
+  row.source_kind === "database"
+    ? { kind: "database", id: row.source_id as ConnectionId }
+    : { kind: "git", id: row.source_id as RepositoryId };
 
-const toMessage = (r: MessageRow): Message => ({
-  id: r.id as MessageId,
-  threadId: r.thread_id as ThreadId,
-  role: r.role as MessageRole,
-  parts: safeParseParts(r.parts_json),
-  createdAt: r.created_at,
+const toThread = (row: ThreadRow, sources: ReadonlyArray<SourceRef>): Thread => ({
+  id: row.id as ThreadId,
+  sources,
+  title: row.title,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  ...(row.sdk_session_id ? { sdkSessionId: row.sdk_session_id } : {}),
+  ...(row.model ? { model: row.model } : {}),
 });
 
 const safeParseParts = (json: string): ReadonlyArray<MessagePart> => {
   try {
-    const v = JSON.parse(json);
-    return Array.isArray(v) ? (v as ReadonlyArray<MessagePart>) : [];
+    const value = JSON.parse(json);
+    return Array.isArray(value) ? (value as ReadonlyArray<MessagePart>) : [];
   } catch {
     return [];
   }
 };
 
-const toApproval = (r: ApprovalDbRow): ApprovalRow => ({
-  id: r.id as ApprovalId,
-  threadId: r.thread_id as ThreadId,
-  messageId: (r.message_id ?? undefined) as MessageId | undefined,
-  sql: r.sql,
-  rowEstimate: r.row_estimate ?? undefined,
-  status: r.status as ApprovalStatus,
-  resultJson: r.result_json ?? undefined,
-  createdAt: r.created_at,
-  resolvedAt: r.resolved_at ?? undefined,
+const toMessage = (row: MessageRow): Message => ({
+  id: row.id as MessageId,
+  threadId: row.thread_id as ThreadId,
+  role: row.role as MessageRole,
+  parts: safeParseParts(row.parts_json),
+  createdAt: row.created_at,
+});
+
+const toApproval = (row: ApprovalDbRow): ApprovalRow => ({
+  id: row.id as ApprovalId,
+  threadId: row.thread_id as ThreadId,
+  connectionId: (row.connection_id ?? undefined) as ConnectionId | undefined,
+  messageId: (row.message_id ?? undefined) as MessageId | undefined,
+  sql: row.sql,
+  rowEstimate: row.row_estimate ?? undefined,
+  status: row.status as ApprovalStatus,
+  resultJson: row.result_json ?? undefined,
+  createdAt: row.created_at,
+  resolvedAt: row.resolved_at ?? undefined,
+});
+
+const toGitRepository = (row: GitRepositoryRow): GitRepository => ({
+  id: row.id as RepositoryId,
+  name: row.name,
+  path: row.path,
+  branch: row.branch,
+  headCommit: row.head_commit,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
 export const newId = (prefix: string) =>
@@ -128,35 +165,63 @@ export const makeChatRepo = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const now = () => new Date().toISOString();
 
-  const getThread: ChatRepoShape["getThread"] = (id) =>
-    sql<ThreadRow>`SELECT * FROM threads WHERE id = ${id}`.pipe(
+  const sourcesFor = (id: ThreadId) =>
+    sql<ThreadSourceRow>`SELECT * FROM thread_sources WHERE thread_id = ${id} ORDER BY position, rowid`.pipe(
       Effect.orDie,
-      Effect.flatMap((rows) =>
-        rows[0] ? Effect.succeed(toThread(rows[0])) : Effect.fail(new NotFound({ entity: "thread", id })),
-      ),
+      Effect.map((rows) => rows.map(toSource)),
     );
 
+  const getThread: ChatRepoShape["getThread"] = (id) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<ThreadRow>`SELECT * FROM threads WHERE id = ${id}`.pipe(Effect.orDie);
+      if (!rows[0]) return yield* Effect.fail(new NotFound({ entity: "thread", id }));
+      return toThread(rows[0], yield* sourcesFor(id));
+    });
+
+  const getGitRepository: ChatRepoShape["getGitRepository"] = (id) =>
+    sql<GitRepositoryRow>`SELECT * FROM git_repositories WHERE id = ${id}`.pipe(
+      Effect.orDie,
+      Effect.flatMap((rows) => rows[0]
+        ? Effect.succeed(toGitRepository(rows[0]))
+        : Effect.fail(new NotFound({ entity: "git repository", id }))),
+    );
+
+  const setThreadSources: ChatRepoShape["setThreadSources"] = (id, sources) =>
+    Effect.gen(function* () {
+      yield* getThread(id);
+      const unique = sources.filter((source, index) =>
+        sources.findIndex((candidate) => candidate.kind === source.kind && candidate.id === source.id) === index,
+      );
+      yield* sql`DELETE FROM thread_sources WHERE thread_id = ${id}`.pipe(Effect.orDie);
+      for (const [position, source] of unique.entries()) {
+        yield* sql`INSERT INTO thread_sources (thread_id, source_kind, source_id, position)
+          VALUES (${id}, ${source.kind}, ${source.id}, ${position})`.pipe(Effect.orDie);
+      }
+      return yield* getThread(id);
+    });
+
   const repo: ChatRepoShape = {
-    listThreads: (connectionId) =>
-      sql<ThreadRow>`SELECT * FROM threads WHERE connection_id = ${connectionId} ORDER BY updated_at DESC`.pipe(
-        Effect.orDie,
-        Effect.map((rows) => rows.map(toThread)),
-      ),
-    getThread,
-    createThread: (connectionId, title) =>
+    listThreads: () =>
       Effect.gen(function* () {
-        const t: Thread = { id: newId("t") as ThreadId, connectionId, title, createdAt: now(), updatedAt: now() };
-        yield* sql`INSERT INTO threads (id, connection_id, title, created_at, updated_at)
-          VALUES (${t.id}, ${t.connectionId}, ${t.title}, ${t.createdAt}, ${t.updatedAt})`.pipe(
-          Effect.catchTag("SqlError", (e: SqlError) =>
-            // FK violation ⇒ the connection row does not exist in sqlite.
-            e.reason._tag === "ConstraintError" || /FOREIGN KEY/i.test(e.message)
-              ? Effect.fail(new NotFound({ entity: "connection", id: connectionId }))
-              : Effect.die(e),
-          ),
-        );
-        return t;
+        const rows = yield* sql<ThreadRow>`SELECT * FROM threads ORDER BY updated_at DESC`.pipe(Effect.orDie);
+        const sourceRows = yield* sql<ThreadSourceRow>`SELECT * FROM thread_sources ORDER BY position, rowid`.pipe(Effect.orDie);
+        const byThread = new Map<string, SourceRef[]>();
+        for (const sourceRow of sourceRows) {
+          const sources = byThread.get(sourceRow.thread_id) ?? [];
+          sources.push(toSource(sourceRow));
+          byThread.set(sourceRow.thread_id, sources);
+        }
+        return rows.map((row) => toThread(row, byThread.get(row.id) ?? []));
       }),
+    getThread,
+    createThread: (title, sources) =>
+      Effect.gen(function* () {
+        const thread: Thread = { id: newId("t") as ThreadId, sources: [], title, createdAt: now(), updatedAt: now() };
+        yield* sql`INSERT INTO threads (id, title, created_at, updated_at)
+          VALUES (${thread.id}, ${thread.title}, ${thread.createdAt}, ${thread.updatedAt})`.pipe(Effect.orDie);
+        return yield* setThreadSources(thread.id, sources);
+      }),
+    setThreadSources,
     deleteThread: (id) =>
       getThread(id).pipe(Effect.andThen(sql`DELETE FROM threads WHERE id = ${id}`.pipe(Effect.orDie, Effect.asVoid))),
     setThreadTitle: (id, title) =>
@@ -176,28 +241,51 @@ export const makeChatRepo = Effect.gen(function* () {
         Effect.orDie,
         Effect.map((rows) => Number(rows[0]?.n ?? 0)),
       ),
-    insertMessage: (m) =>
+    insertMessage: (message) =>
       sql`INSERT INTO messages (id, thread_id, role, parts_json, created_at)
-        VALUES (${m.id}, ${m.threadId}, ${m.role}, ${JSON.stringify(m.parts)}, ${m.createdAt})`.pipe(
+        VALUES (${message.id}, ${message.threadId}, ${message.role}, ${JSON.stringify(message.parts)}, ${message.createdAt})`.pipe(
         Effect.orDie,
         Effect.asVoid,
       ),
-    createApproval: (a) =>
-      sql`INSERT INTO approvals (id, thread_id, message_id, sql, row_estimate, status, created_at)
-        VALUES (${a.id}, ${a.threadId}, ${a.messageId}, ${a.sql}, ${a.rowEstimate ?? null}, 'pending', ${now()})`.pipe(
+    createApproval: (approval) =>
+      sql`INSERT INTO approvals (id, thread_id, connection_id, message_id, sql, row_estimate, status, created_at)
+        VALUES (${approval.id}, ${approval.threadId}, ${approval.connectionId}, ${approval.messageId}, ${approval.sql}, ${approval.rowEstimate ?? null}, 'pending', ${now()})`.pipe(
         Effect.orDie,
         Effect.asVoid,
       ),
     getApproval: (id) =>
       sql<ApprovalDbRow>`SELECT * FROM approvals WHERE id = ${id}`.pipe(
         Effect.orDie,
-        Effect.flatMap((rows) =>
-          rows[0] ? Effect.succeed(toApproval(rows[0])) : Effect.fail(new NotFound({ entity: "approval", id })),
-        ),
+        Effect.flatMap((rows) => rows[0]
+          ? Effect.succeed(toApproval(rows[0]))
+          : Effect.fail(new NotFound({ entity: "approval", id }))),
       ),
     setApprovalStatus: (id, status, result) =>
       sql`UPDATE approvals SET status = ${status}, result_json = ${result === undefined ? null : JSON.stringify(result)},
         resolved_at = ${now()} WHERE id = ${id}`.pipe(Effect.orDie, Effect.asVoid),
+    listGitRepositories: () =>
+      sql<GitRepositoryRow>`SELECT * FROM git_repositories ORDER BY updated_at DESC`.pipe(
+        Effect.orDie,
+        Effect.map((rows) => rows.map(toGitRepository)),
+      ),
+    getGitRepository,
+    insertGitRepository: (repository) =>
+      sql`INSERT INTO git_repositories (id, name, path, branch, head_commit, created_at, updated_at)
+        VALUES (${repository.id}, ${repository.name}, ${repository.path}, ${repository.branch}, ${repository.headCommit}, ${repository.createdAt}, ${repository.updatedAt})`.pipe(
+        Effect.orDie,
+        Effect.asVoid,
+      ),
+    updateGitRepositoryHead: (id, branch, headCommit) =>
+      sql`UPDATE git_repositories SET branch = ${branch}, head_commit = ${headCommit}, updated_at = ${now()} WHERE id = ${id}`.pipe(
+        Effect.orDie,
+        Effect.andThen(getGitRepository(id)),
+      ),
+    deleteGitRepository: (id) =>
+      Effect.gen(function* () {
+        yield* getGitRepository(id);
+        yield* sql`DELETE FROM thread_sources WHERE source_kind = 'git' AND source_id = ${id}`.pipe(Effect.orDie);
+        yield* sql`DELETE FROM git_repositories WHERE id = ${id}`.pipe(Effect.orDie);
+      }),
   };
   return repo;
 });
