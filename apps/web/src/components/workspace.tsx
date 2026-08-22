@@ -40,20 +40,26 @@ function useUpdateState() {
 /** Turn a raw GitHub release body into clean, human-readable bullet lines. */
 function formatReleaseNotes(body: string | undefined): string[] {
   if (!body) return [];
+  const seen = new Set<string>();
   return body
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) =>
       line
         .replace(/^[-*#>\s]+/, "") // leading markdown bullets/headings/quotes
-        .replace(/\s+by\s+@[\w-]+(?:\s+in\s+\S+)?$/i, "") // "by @user in <url>" attribution
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // [text](url) → text
+        .replace(/\s+by\s+@[\w-]+(?:\s+in\s+\S+)?\s*$/i, "") // "by @user in <url>" attribution
         .replace(/\(?https?:\/\/\S+\)?/g, "") // bare/inline urls
+        .replace(/\s*\(#\d+\)\s*$/, "") // trailing "(#123)" PR refs
+        .replace(/^(?:feat|fix|chore|docs|refactor|perf|style|test|build|ci)(?:\([^)]*\))?!?:\s*/i, "") // conventional-commit prefix
         .replace(/\*\*/g, "") // stray bold markers
         .replace(/^\*+|\*+$/g, "") // stray asterisks
         .replace(/`([^`]+)`/g, "$1") // inline code fences
         .trim(),
     )
+    .map((line) => (line ? line[0]!.toUpperCase() + line.slice(1) : line))
     .filter((line) => line.length > 0)
-    .filter((line) => !/^(what'?s changed|full changelog|new contributors?|changelog)\b/i.test(line));
+    .filter((line) => !/^(what'?s changed|full changelog|new contributors?|changelog|version packages)\b/i.test(line))
+    .filter((line) => { const k = line.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 /** Single footer icon: check → update available (hover = version diff + notes) → downloading → restart to install. */
@@ -90,7 +96,9 @@ function UpdateIcon() {
     "Check for updates";
 
   const busy = status === "checking" || status === "downloading";
-  const notes = formatReleaseNotes(latest?.notes).slice(0, 6);
+  const allNotes = formatReleaseNotes(latest?.notes);
+  const notes = allNotes.slice(0, 5);
+  const moreCount = allNotes.length - notes.length;
 
   return (
     <Tooltip>
@@ -98,14 +106,22 @@ function UpdateIcon() {
         {icon}
         {(status === "available" || status === "ready") && <span aria-hidden className="absolute right-1 top-1 size-1.5 rounded-full bg-brand" />}
       </TooltipTrigger>
-      <TooltipContent side="top" align="start" className="max-w-72">
+      <TooltipContent side="top" align="start" className="w-72 max-w-72 items-start px-3 py-2">
         {status === "available" || status === "ready" || status === "downloading" ? (
-          <div className="space-y-1">
-            <div className="font-mono text-[11px]">{state?.current} → {latest?.version}</div>
-            <div className="text-[11px] font-medium">{label}</div>
+          <div className="w-full min-w-0 space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[11px] font-medium">{label}</span>
+              <span className="shrink-0 font-mono text-[10px] opacity-60">{state?.current} → {latest?.version}</span>
+            </div>
             {notes.length > 0 && (
-              <ul className="space-y-0.5 border-t border-line/40 pt-1 text-[10.5px] leading-snug opacity-80">
-                {notes.map((n, i) => <li key={i} className="truncate">{n}</li>)}
+              <ul className="space-y-1 border-t border-background/20 pt-1.5 text-[10.5px] leading-snug opacity-80">
+                {notes.map((n, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span aria-hidden className="mt-[5px] size-1 shrink-0 rounded-full bg-current opacity-60" />
+                    <span className="min-w-0 break-words">{n}</span>
+                  </li>
+                ))}
+                {moreCount > 0 && <li className="pl-2.5 opacity-60">+{moreCount} more</li>}
               </ul>
             )}
           </div>
